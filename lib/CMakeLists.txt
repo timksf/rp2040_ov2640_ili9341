@@ -1,0 +1,2 @@
+add_subdirectory(ov2640)
+add_subdirectory(ili9341)
