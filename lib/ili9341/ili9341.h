@@ -2,9 +2,8 @@
 #define ILI9341_H
 #include "pico/stdlib.h"
 #include "hardware/spi.h"
+#include "hardware/dma.h"
 
-// Use DMA?
-//#define USE_DMA 1
 
 #define MADCTL_MY 0x80  ///< Bottom to top
 #define MADCTL_MX 0x40  ///< Right to left
@@ -88,22 +87,35 @@
 
 struct ili9341_config {
     spi_inst_t *spi;
-    uint pin_rst;
+    int pin_rst;
     uint pin_dc;
 
-    uint pin_cs;
+    uint pin_cs; //active low
     uint pin_sck;
     uint pin_tx;
     uint pin_rx;
+
+    //the following attributes are set by the init function
+    uint dma_chan;
+    dma_channel_config dma_cfg;
+
+    uint width;
+    uint height;
 };
 
-void LCD_setPins(uint16_t dc, uint16_t cs, int16_t rst, uint16_t sck, uint16_t tx);
-void LCD_setSPIperiph(spi_inst_t *s);
-void LCD_initDisplay();
+void ili9341_init(struct ili9341_config *cfg);
 
-void LCD_setRotation(uint8_t m);
+void ili9341_set_rotation(struct ili9341_config *cfg, uint8_t m);
 
-void LCD_WritePixel(int x, int y, uint16_t col);
-void LCD_WriteBitmap(uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint16_t *bitmap);
+void ili9341_write_pix(struct ili9341_config *cfg, int x, int y, uint16_t col);
+void ili9341_write_frame(struct ili9341_config *cfg, uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint16_t *frame);
+
+void ili9341_reset(struct ili9341_config *cfg);
+void ili9341_wait_for_dma(struct ili9341_config *cfg);
+
+void ili9341_select(struct ili9341_config *cfg);
+void ili9341_write_command(struct ili9341_config *cfg, uint8_t cmd);
+void ili9341_send_command(struct ili9341_config *cfg, uint8_t cmd, const uint8_t *args, uint8_t arg_size);
+void ili9341_write_data(struct ili9341_config *cfg, const uint8_t *d, size_t size);
 
 #endif

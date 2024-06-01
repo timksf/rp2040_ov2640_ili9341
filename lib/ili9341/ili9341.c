@@ -4,22 +4,7 @@
 
 #include "ili9341.h"
 
-uint16_t _width;  ///< Display width as modified by current rotation
-uint16_t _height; ///< Display height as modified by current rotation
-
-int16_t _xstart = 0; ///< Internal framebuffer X offset
-int16_t _ystart = 0; ///< Internal framebuffer Y offset
-
-uint8_t rotation;
-
-spi_inst_t *ili9341_spi = spi_default;
-
-uint16_t ili9341_pinCS = PICO_DEFAULT_SPI_CSN_PIN;
-uint16_t ili9341_pinDC = 20;
-int16_t ili9341_pinRST = 16;
-
-uint16_t ili9341_pinSCK = PICO_DEFAULT_SPI_SCK_PIN;
-uint16_t ili9341_pinTX = PICO_DEFAULT_SPI_TX_PIN;
+//based on adafruit driver
 
 const uint8_t initcmd[] = {
     24, //24 commands
@@ -50,226 +35,178 @@ const uint8_t initcmd[] = {
     0x00				  // End of list
 };
 
-#ifdef USE_DMA
-uint dma_tx;
-dma_channel_config dma_cfg;
-void waitForDMA()
-{
+void ili9341_init(struct ili9341_config *cfg) {
+    spi_init(cfg->spi, 1000 * 40000); //40Mbps
+    spi_set_format(cfg->spi, 16, SPI_CPOL_1, SPI_CPOL_1, SPI_MSB_FIRST);
 
-    dma_channel_wait_for_finish_blocking(dma_tx);
-}
-#endif
+    gpio_set_function(cfg->pin_sck, GPIO_FUNC_SPI);
+    gpio_set_function(cfg->pin_tx, GPIO_FUNC_SPI);
 
-void LCD_setPins(uint16_t dc, uint16_t cs, int16_t rst, uint16_t sck, uint16_t tx)
-{
-    ili9341_pinDC = dc;
-    ili9341_pinCS = cs;
-    ili9341_pinRST = rst;
-    ili9341_pinSCK = sck;
-    ili9341_pinTX = tx;
-}
+    gpio_init(cfg->pin_cs);
+    gpio_set_dir(cfg->pin_cs, GPIO_OUT);
+    gpio_put(cfg->pin_cs, 1);
 
-void LCD_setSPIperiph(spi_inst_t *s)
-{
-    ili9341_spi = s;
-}
+    gpio_init(cfg->pin_dc);
+    gpio_set_dir(cfg->pin_dc, GPIO_OUT);
+    gpio_put(cfg->pin_dc, 1);
 
-void initSPI()
-{
-    spi_init(ili9341_spi, 1000 * 40000);
-    spi_set_format(ili9341_spi, 16, SPI_CPOL_1, SPI_CPOL_1, SPI_MSB_FIRST);
-    gpio_set_function(ili9341_pinSCK, GPIO_FUNC_SPI);
-    gpio_set_function(ili9341_pinTX, GPIO_FUNC_SPI);
-
-    gpio_init(ili9341_pinCS);
-    gpio_set_dir(ili9341_pinCS, GPIO_OUT);
-    gpio_put(ili9341_pinCS, 1);
-
-    gpio_init(ili9341_pinDC);
-    gpio_set_dir(ili9341_pinDC, GPIO_OUT);
-    gpio_put(ili9341_pinDC, 1);
-
-    if (ili9341_pinRST != -1)
-    {
-        gpio_init(ili9341_pinRST);
-        gpio_set_dir(ili9341_pinRST, GPIO_OUT);
-        gpio_put(ili9341_pinRST, 1);
+    if (cfg->pin_rst != -1) {
+        gpio_init(cfg->pin_rst);
+        gpio_set_dir(cfg->pin_rst, GPIO_OUT);
+        gpio_put(cfg->pin_rst, 1);
     }
 
-#ifdef USE_DMA
-    dma_tx = dma_claim_unused_channel(true);
-    dma_cfg = dma_channel_get_default_config(dma_tx);
-    channel_config_set_transfer_data_size(&dma_cfg, DMA_SIZE_16);
-    channel_config_set_dreq(&dma_cfg, spi_get_dreq(ili9341_spi, true));
-#endif
-}
+    //configure DMA (we only want to output data via SPI)
+    cfg->dma_chan = dma_claim_unused_channel(true);
+    cfg->dma_cfg = dma_channel_get_default_config(cfg->dma_chan);
+    channel_config_set_transfer_data_size(&cfg->dma_cfg, DMA_SIZE_16);
+    channel_config_set_dreq(&cfg->dma_cfg, spi_get_dreq(cfg->spi, true));
 
-void ILI9341_Reset()
-{
-    if (ili9341_pinRST != -1)
-    {
-        gpio_put(ili9341_pinRST, 0);
-        sleep_ms(5);
-        gpio_put(ili9341_pinRST, 1);
+    dma_channel_configure(
+        cfg->dma_chan, &cfg->dma_cfg,
+        &spi_get_hw(cfg->spi)->dr,  //write address
+        NULL,					    //read address still unknown
+        0,						    //element count still unknown
+        false                       //don't start yet
+    );
+
+    //init display over SPI
+    ili9341_select(cfg);
+    if (cfg->pin_rst < 0) {
+        ili9341_write_command(cfg, ILI9341_SWRESET);
         sleep_ms(150);
-    }
-}
+    } else
+        ili9341_reset(cfg);
 
-void ILI9341_Select()
-{
-    gpio_put(ili9341_pinCS, 0);
-}
-
-void ILI9341_DeSelect()
-{
-    gpio_put(ili9341_pinCS, 1);
-}
-
-void ILI9341_RegCommand()
-{
-    gpio_put(ili9341_pinDC, 0);
-}
-
-void ILI9341_RegData()
-{
-    gpio_put(ili9341_pinDC, 1);
-}
-
-void ILI9341_WriteCommand(uint8_t cmd)
-{
-    ILI9341_RegCommand();
-    spi_set_format(ili9341_spi, 8, SPI_CPOL_1, SPI_CPOL_1, SPI_MSB_FIRST);
-    spi_write_blocking(ili9341_spi, &cmd, sizeof(cmd));
-}
-
-void ILI9341_WriteData(uint8_t *buff, size_t buff_size)
-{
-    ILI9341_RegData();
-    spi_set_format(ili9341_spi, 8, SPI_CPOL_1, SPI_CPOL_1, SPI_MSB_FIRST);
-    spi_write_blocking(ili9341_spi, buff, buff_size);
-}
-
-void ILI9341_SendCommand(uint8_t commandByte, uint8_t *dataBytes,
-                         uint8_t numDataBytes)
-{
-    ILI9341_Select();
-
-    ILI9341_WriteCommand(commandByte);
-    ILI9341_WriteData(dataBytes, numDataBytes);
-
-    ILI9341_DeSelect();
-}
-
-void LCD_initDisplay()
-{
-    initSPI();
-    ILI9341_Select();
-
-    if (ili9341_pinRST < 0)
-    {										   // If no hardware reset pin...
-        ILI9341_WriteCommand(ILI9341_SWRESET); // Engage software reset
-        sleep_ms(150);
-    }
-    else
-        ILI9341_Reset();
-
-    uint8_t *addr = initcmd;
-    uint8_t numCommands, cmd, numArgs;
+    const uint8_t *addr = initcmd;
+    uint8_t n_cmds, cmd, n_args;
     uint16_t ms;
-    numCommands = *(addr++); // Number of commands to follow
-    while (numCommands--)
-    {					 // For each command...
-        cmd = *(addr++); // Read command
-        // numArgs = *(addr++);		 // Number of args to follow
+    n_cmds = *(addr++);
+    while (n_cmds--) {
+        cmd = *(addr++);
         uint8_t x = *(addr++);
-        numArgs = x & 0x7F; // Mask out delay bit
-        ILI9341_SendCommand(cmd, addr, numArgs);
-        addr += numArgs;
+        n_args = x & 0x7F; //mask out delay bit
+        ili9341_send_command(cfg, cmd, addr, n_args);
+        addr += n_args;
 
         if (x & 0x80)
             sleep_ms(150);
     }
 
-    _width = ILI9341_TFTWIDTH;
-    _height = ILI9341_TFTHEIGHT;
+    cfg->width = ILI9341_TFTWIDTH;
+    cfg->height = ILI9341_TFTHEIGHT;
 }
 
-void LCD_setRotation(uint8_t m)
-{
-    rotation = m % 4; // can't be higher than 3
-    switch (rotation)
-    {
+void ili9341_reset(struct ili9341_config *cfg) {
+    if (cfg->pin_rst != -1) {
+        gpio_put(cfg->pin_rst, 0);
+        sleep_ms(5);
+        gpio_put(cfg->pin_rst, 1);
+        sleep_ms(150);
+    }
+}
+
+void ili9341_select(struct ili9341_config *cfg) {
+    gpio_put(cfg->pin_cs, 0);
+}
+
+void ili9341_deselect(struct ili9341_config *cfg) {
+    gpio_put(cfg->pin_cs, 1);
+}
+
+void ili9341_announce_command(struct ili9341_config *cfg) {
+    gpio_put(cfg->pin_dc, 0);
+}
+
+void ili9341_announce_data(struct ili9341_config *cfg) {
+    gpio_put(cfg->pin_dc, 1);
+}
+
+void ili9341_write_command(struct ili9341_config *cfg, uint8_t cmd) {
+    ili9341_announce_command(cfg);
+    spi_set_format(cfg->spi, 8, SPI_CPOL_1, SPI_CPOL_1, SPI_MSB_FIRST);
+    spi_write_blocking(cfg->spi, &cmd, sizeof(cmd));
+}
+
+void ili9341_write_data(struct ili9341_config *cfg, const uint8_t *d, size_t size) {
+    ili9341_announce_data(cfg);
+    spi_set_format(cfg->spi, 8, SPI_CPOL_1, SPI_CPOL_1, SPI_MSB_FIRST);
+    spi_write_blocking(cfg->spi, d, size);
+}
+
+void ili9341_send_command(struct ili9341_config *cfg, uint8_t cmd, const uint8_t *args, uint8_t arg_size) {
+    ili9341_select(cfg);
+    ili9341_write_command(cfg, cmd);
+    ili9341_write_data(cfg, args, arg_size);
+    ili9341_deselect(cfg);
+}
+
+void ili9341_set_rotation(struct ili9341_config *cfg, uint8_t m) {
+    uint8_t rotation = m % 4; // can't be higher than 3
+    switch (rotation) {
     case 0:
         m = (MADCTL_MX | MADCTL_BGR);
-        _width = ILI9341_TFTWIDTH;
-        _height = ILI9341_TFTHEIGHT;
+        cfg->width = ILI9341_TFTWIDTH;
+        cfg->height = ILI9341_TFTHEIGHT;
         break;
     case 1:
         m = (MADCTL_MV | MADCTL_BGR);
-        _width = ILI9341_TFTHEIGHT;
-        _height = ILI9341_TFTWIDTH;
+        cfg->width = ILI9341_TFTHEIGHT;
+        cfg->height = ILI9341_TFTWIDTH;
         break;
     case 2:
         m = (MADCTL_MY | MADCTL_BGR);
-        _width = ILI9341_TFTWIDTH;
-        _height = ILI9341_TFTHEIGHT;
+        cfg->width = ILI9341_TFTWIDTH;
+        cfg->height = ILI9341_TFTHEIGHT;
         break;
     case 3:
         m = (MADCTL_MX | MADCTL_MY | MADCTL_MV | MADCTL_BGR);
-        _width = ILI9341_TFTHEIGHT;
-        _height = ILI9341_TFTWIDTH;
+        cfg->width = ILI9341_TFTHEIGHT;
+        cfg->height = ILI9341_TFTWIDTH;
         break;
     }
-
-    ILI9341_SendCommand(ILI9341_MADCTL, &m, 1);
+    ili9341_send_command(cfg, ILI9341_MADCTL, &m, 1);
 }
 
-void LCD_setAddrWindow(uint16_t x, uint16_t y, uint16_t w, uint16_t h)
-{
+void ili9341_set_addr_window(struct ili9341_config *cfg, uint16_t x, uint16_t y, uint16_t w, uint16_t h) {
     uint32_t xa = ((uint32_t)x << 16) | (x + w - 1);
     uint32_t ya = ((uint32_t)y << 16) | (y + h - 1);
 
     xa = __builtin_bswap32(xa);
     ya = __builtin_bswap32(ya);
 
-    ILI9341_WriteCommand(ILI9341_CASET);
-    ILI9341_WriteData(&xa, sizeof(xa));
+    ili9341_write_command(cfg, ILI9341_CASET);
+    ili9341_write_data(cfg, (uint8_t*)&xa, sizeof(xa));
 
     // row address set
-    ILI9341_WriteCommand(ILI9341_PASET);
-    ILI9341_WriteData(&ya, sizeof(ya));
+    ili9341_write_command(cfg, ILI9341_PASET);
+    ili9341_write_data(cfg, (uint8_t*)&ya, sizeof(ya));
 
     // write to RAM
-    ILI9341_WriteCommand(ILI9341_RAMWR);
+    ili9341_write_command(cfg, ILI9341_RAMWR);
 }
 
-void LCD_WriteBitmap(uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint16_t *bitmap)
-{
-    ILI9341_Select();
-    LCD_setAddrWindow(x, y, w, h); // Clipped area
-    ILI9341_RegData();
-    spi_set_format(ili9341_spi, 16, SPI_CPOL_1, SPI_CPOL_1, SPI_MSB_FIRST);
-#ifdef USE_DMA
-    dma_channel_configure(dma_tx, &dma_cfg,
-                          &spi_get_hw(ili9341_spi)->dr, // write address
-                          bitmap,						// read address
-                          w * h,						// element count (each element is of size transfer_data_size)
-                          true);						// start asap
-    waitForDMA();
-#else
-
-    spi_write16_blocking(ili9341_spi, bitmap, w * h);
-#endif
-
-    ILI9341_DeSelect();
+void ili9341_write_frame(struct ili9341_config *cfg, uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint16_t *frame) {
+    ili9341_select(cfg);
+    ili9341_set_addr_window(cfg, x, y, w, h); // Clipped area
+    ili9341_announce_data(cfg);
+    spi_set_format(cfg->spi, 16, SPI_CPOL_1, SPI_CPOL_1, SPI_MSB_FIRST);
+    dma_channel_configure(
+        cfg->dma_chan, &cfg->dma_cfg,
+        &spi_get_hw(cfg->spi)->dr, //WRITE_ADDR
+        frame, //READ_ADDR
+        w * h, //TRANS_COUNT
+        true //start
+    );
+    dma_channel_wait_for_finish_blocking(cfg->dma_chan);
+    ili9341_deselect(cfg);
 }
 
-void LCD_WritePixel(int x, int y, uint16_t col)
-{
-    ILI9341_Select();
-    LCD_setAddrWindow(x, y, 1, 1); // Clipped area
-    ILI9341_RegData();
-    spi_set_format(ili9341_spi, 16, SPI_CPOL_1, SPI_CPOL_1, SPI_MSB_FIRST);
-    spi_write16_blocking(ili9341_spi, &col, 1);
-    ILI9341_DeSelect();
+void ili9341_write_pix(struct ili9341_config *cfg, int x, int y, uint16_t col) {
+    ili9341_select(cfg);
+    ili9341_set_addr_window(cfg, x, y, 1, 1); // Clipped area
+    ili9341_announce_data(cfg);
+    spi_set_format(cfg->spi, 16, SPI_CPOL_1, SPI_CPOL_1, SPI_MSB_FIRST);
+    spi_write16_blocking(cfg->spi, &col, 1);
+    ili9341_deselect(cfg);
 }

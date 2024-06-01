@@ -1,21 +1,57 @@
-.program image
-.wrap_target
-    wait 1 pin 9 // wait for hsync
-    wait 1 pin 8 // wait for rising pclk
+
+.define OFFS_PCLK       8   //
+.define OFFS_HREF       9   //
+.define OFFS_VSYNC      10  //
+.define IRQ_BYTE        4   //IRQ indices 4-7 are only visible to SMs
+.define IRQ_FRAME_REQ   0
+.define IRQ_FRAME_DONE  1
+
+.program image_byte_capture
+    wait 1 irq BYTE_IRQ     // wait to be triggered
+.wrap_target                // continuously read out bytes
+    wait 1 pin OFFS_HREF    // wait for href
+    wait 1 pin OFFS_PCLK    // wait for rising pclk
     in pins 8
-    wait 0 pin 8
+    wait 0 pin OFFS_PCLK    // wait for falling pclk
+.wrap
+
+.program image_frame_capture
+.wrap_target
+    irq wait IRQ_FRAME_REQ      //wait for frame request
+    wait 1 pin OFFS_VSYNC       //wait for VSYNC rising edge for start of frame
+pixels:
+    irq set BYTE_IRQ            //trigger SM for byte capture
+    wait 1 pin OFFS_VSYNC       //let byte capture run until next VSYNC
+    irq wait IRQ_FRAME_DONE     //signal frame finish to CPU
+
+    //after clearing the interrupt, the CPU should restart the byte capture SM
 .wrap
 
 % c-sdk {
-void image_program_init(PIO pio, uint sm, uint offset, uint pin_base) {
+void camera_pio_setup_gpios(PIO pio, uint sm, uint pin_base) {
     pio_sm_set_consecutive_pindirs(pio, sm, pin_base, 10, false);
+}
 
-    pio_sm_config c = image_program_get_default_config(offset);
+void image_byte_capture_init(PIO pio, uint sm, uint offset, uint pin_base) {
+    pio_sm_config c = image_frame_capture_program_get_default_config(offset);
     sm_config_set_in_pins(&c, pin_base);
-    sm_config_set_in_shift(&c, false, true, 8);
+    sm_config_set_in_shift(&c, false, true, 8); //auto push at 8 bit threshold
     sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_RX);
 
     pio_sm_init(pio, sm, offset, &c);
     pio_sm_set_enabled(pio, sm, true);
 }
+
+void image_frame_capture_init(PIO pio, uint sm, uint offset, uint pin_base) {
+    pio_sm_config c = image_byte_capture_program_get_default_config(offset);
+    sm_config_set_in_pins(&c, pin_base); //just set in pins so that we can use offset in `wait`
+    
+    pio_sm_init(pio, sm, offset, &c);
+    pio_sm_set_enabled(pio, sm, true);
+}
+
+static inline void trigger_frame_capture(PIO pio) {
+    pio_interrupt_clear(pio, IRQ_FRAME_REQ); //clearing this will request a new frame
+}
+
 %}
