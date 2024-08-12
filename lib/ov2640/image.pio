@@ -1,30 +1,43 @@
 
-.define OFFS_PCLK       8   //
-.define OFFS_HREF       9   //
-.define OFFS_VSYNC      10  //
-.define IRQ_BYTE        4   //IRQ indices 4-7 are only visible to SMs
-.define IRQ_FRAME_REQ   0
-.define IRQ_FRAME_DONE  1
+.define OFFS_PCLK               8   //
+.define OFFS_HREF               9   //
+.define OFFS_VSYNC              10  //
+.define PUBLIC IRQ_BYTE         4   //IRQ indices 4-7 are only visible to SMs
+.define PUBLIC IRQ_FRAME_DONE   0
+.define DEBOUNCE_COUNT          2 //cycles for VSYNC debouncing
+
 
 .program image_byte_capture
-    wait 1 irq BYTE_IRQ     // wait to be triggered
-.wrap_target                // continuously read out bytes
-    wait 1 pin OFFS_HREF    // wait for href
-    wait 1 pin OFFS_PCLK    // wait for rising pclk
+    wait 1 irq IRQ_BYTE     ;wait to be triggered, then continuously read out bytes
+.wrap_target
+    wait 1 pin OFFS_HREF    ;wait for href
+    wait 1 pin OFFS_PCLK    ;wait for rising pclk
     in pins 8
-    wait 0 pin OFFS_PCLK    // wait for falling pclk
+    wait 0 pin OFFS_PCLK    ;wait for falling pclk
+
+    ;the byte capture SM does not know about the amount of bytes, it will just capture bytes until 
+    ;it is resetted, the DMA channel handles the frame sizes
 .wrap
 
 .program image_frame_capture
+    set pindirs, 0    ; Set the direction for the VSYNC pin (0 for input)
+    set pins, OFFS_VSYNC ; Set the specific pin to monitor for jmp pin
 .wrap_target
-    irq wait IRQ_FRAME_REQ      //wait for frame request
-    wait 1 pin OFFS_VSYNC       //wait for VSYNC rising edge for start of frame
-pixels:
-    irq set BYTE_IRQ            //trigger SM for byte capture
-    wait 1 pin OFFS_VSYNC       //let byte capture run until next VSYNC
-    irq wait IRQ_FRAME_DONE     //signal frame finish to CPU
+    pull                        ;wait for frame request token
+debounce_vsync:
+    wait 1 pin OFFS_VSYNC       ; wait for VSYNC rising edge (start of frame)
+    set x, DEBOUNCE_COUNT       ; set debounce counter
+debounce_loop:
+    jmp x-- debounce_loop       ; loop until counter reaches zero
+    jmp pin debounce_done       ; check if pin is stable (still high)
+    jmp debounce_vsync          ; if pin was not stable, start over
+debounce_done:
+    irq wait IRQ_BYTE           ;trigger SM for byte capture
+    wait 0 pin OFFS_VSYNC       ;
+    wait 1 pin OFFS_VSYNC       ;let byte capture run until next VSYNC
+    irq set IRQ_FRAME_DONE      ;signal frame finish to CPU and wait
 
-    //after clearing the interrupt, the CPU should restart the byte capture SM
+    ;after clearing the interrupt, the CPU should restart the byte capture SM
 .wrap
 
 % c-sdk {
@@ -33,25 +46,33 @@ void camera_pio_setup_gpios(PIO pio, uint sm, uint pin_base) {
 }
 
 void image_byte_capture_init(PIO pio, uint sm, uint offset, uint pin_base) {
-    pio_sm_config c = image_frame_capture_program_get_default_config(offset);
+    pio_sm_config c = image_byte_capture_program_get_default_config(offset);
     sm_config_set_in_pins(&c, pin_base);
     sm_config_set_in_shift(&c, false, true, 8); //auto push at 8 bit threshold
-    sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_RX);
+    sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_RX); //no data output, use fifos as RX only
+
+    pio_interrupt_clear(pio, IRQ_BYTE);
 
     pio_sm_init(pio, sm, offset, &c);
     pio_sm_set_enabled(pio, sm, true);
 }
 
 void image_frame_capture_init(PIO pio, uint sm, uint offset, uint pin_base) {
-    pio_sm_config c = image_byte_capture_program_get_default_config(offset);
+    pio_sm_config c = image_frame_capture_program_get_default_config(offset);
     sm_config_set_in_pins(&c, pin_base); //just set in pins so that we can use offset in `wait`
     
+    ;//enable system level interrupt and make sure it's cleared
+    pio_set_irq0_source_enabled(pio, (enum pio_interrupt_source)(pis_interrupt0 + sm), true);
+    pio_interrupt_clear(pio, IRQ_FRAME_DONE);
+
     pio_sm_init(pio, sm, offset, &c);
     pio_sm_set_enabled(pio, sm, true);
 }
 
-static inline void trigger_frame_capture(PIO pio) {
-    pio_interrupt_clear(pio, IRQ_FRAME_REQ); //clearing this will request a new frame
+static inline void trigger_frame_capture(PIO pio, uint sm, uint rows, uint cols) {
+    pio_interrupt_clear(pio, IRQ_FRAME_DONE);
+    pio_sm_put_blocking(pio, sm, 1); //start token
+    ; pio_sm_put_blocking(pio, sm, cols-1);
 }
 
 %}

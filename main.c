@@ -3,6 +3,7 @@
 #include "pico/stdlib.h"
 #include "ov2640.h"
 #include "ili9341.h"
+#include "hardware/dma.h"
 // #include "img.h"
 
 #define UART_INST uart1
@@ -27,10 +28,25 @@ const int PIN_CAM_RESETB = 22;
 const int PIN_CAM_VSYNC = 16;
 const int PIN_CAM_Y2_PIO_BASE = 6;
 
+const uint8_t CMD_REG_WRITE = 0xAA;
+const uint8_t CMD_REG_READ = 0xBB;
+const uint8_t CMD_CAPTURE = 0xCC;
+
 uint16_t frame_buf[320*240];
+
+//forward declaration of callbacks  
+bool timer_callback(__unused struct repeating_timer *t);
 
 int main() {
     stdio_init_all(); //will only init what is enabled in the CMakeLists file
+
+    uart_init(UART_INST, 1000000);
+    gpio_set_function(20, GPIO_FUNC_UART);
+    gpio_set_function(21, GPIO_FUNC_UART);
+
+    uart_set_hw_flow(UART_INST, false, false);
+    uart_set_format(UART_INST, 8, 1, UART_PARITY_NONE);
+    uart_puts(UART_INST, "Hello from UART");
 
     for(int i = 0; i < ILI9341_TFTWIDTH*ILI9341_TFTHEIGHT; i++) 
         frame_buf[i] = ILI9341_CYAN;
@@ -60,7 +76,7 @@ int main() {
     cam_config.image_buf_size = sizeof(frame_buf);
 
     ili9341_init(&lcd_config);
-    ili9341_set_rotation(&lcd_config, 1); //"landscape mode"
+    ili9341_set_rotation(&lcd_config,1); //"landscape mode"
     ili9341_write_frame(&lcd_config, 0, 0, ILI9341_TFTHEIGHT, ILI9341_TFTWIDTH, frame_buf);
 
     for(int i = 0; i < ILI9341_TFTWIDTH*ILI9341_TFTHEIGHT; i++) 
@@ -71,7 +87,7 @@ int main() {
     ov2640_init(&cam_config);
     uint16_t cam_id = ov2640_read_id(&cam_config);
 
-    //after setup wait for serial terminal connection on USB port
+    // after setup wait for serial terminal connection on USB port
     // while (!tud_cdc_connected()) { 
     //     sleep_ms(100);  
     // }
@@ -82,10 +98,26 @@ int main() {
     gpio_init(PIN_LED);
     gpio_set_dir(PIN_LED, GPIO_OUT);
 
+    struct repeating_timer timer;
+    add_repeating_timer_ms(-1000, timer_callback, NULL, &timer);
+
+    volatile dma_debug_hw_t *volatile dma_dbg = dma_debug_hw;
+
     while(1){
-        gpio_put(PIN_LED, !gpio_get(PIN_LED));
-        ov2640_start_frame_capture(&cam_config);
-        dma_channel_wait_for_finish_blocking(cam_config.dma_channel);
-        ili9341_write_frame(&lcd_config, 0, 0, ILI9341_TFTHEIGHT, ILI9341_TFTWIDTH, frame_buf);
+        uint8_t cmd;
+        uart_read_blocking(UART_INST, &cmd, 1);
+
+        if (cmd == CMD_CAPTURE) {
+            ov2640_frame_capture(&cam_config, true);
+            uart_write_blocking(UART_INST, cam_config.image_buf, cam_config.image_buf_size);
+        }
+
+        // dma_channel_wait_for_finish_blocking(cam_config.dma_channel);
+        // ili9341_write_frame(&lcd_config, 0, 0, ILI9341_TFTHEIGHT, ILI9341_TFTWIDTH, frame_buf);
     }
+}
+
+bool timer_callback(__unused struct repeating_timer *t) {
+    gpio_put(PIN_LED, !gpio_get(PIN_LED));
+    return true;
 }

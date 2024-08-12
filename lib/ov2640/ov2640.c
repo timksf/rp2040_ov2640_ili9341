@@ -7,19 +7,24 @@
 #include "hardware/pwm.h"
 #include "image.pio.h"
 
+#define PIO_IRQ_NUM(pio, irq_index) ((pio == pio0) ? PIO0_IRQ_0 + (irq_index) : PIO1_IRQ_0 + (irq_index))
+
 static const uint8_t OV2640_ADDR = 0x60 >> 1;
 struct ov2640_config *volatile irq_context;
 
 static void frame_done_isr(void) {
     if(irq_context == NULL) 
         return;
-    //restart byte capture SM 
-    pio_sm_restart(irq_context->pio, irq_context->byte_sm);
-    pio_sm_clear_fifos(irq_context->pio, irq_context->byte_prog_offs);
     //jump to beginning so that byte SM waits for interrupt
-    pio_sm_exec(irq_context->pio, irq_context->byte_sm, 0x0000 | irq_context->byte_prog_offs);
+    pio_sm_exec(irq_context->pio, irq_context->byte_sm, pio_encode_jmp(irq_context->byte_prog_offs));
+    pio_sm_clear_fifos(irq_context->pio, irq_context->byte_sm);
+    //restart byte capture SM
+    pio_sm_restart(irq_context->pio, irq_context->byte_sm);
+    pio_interrupt_clear(irq_context->pio, IRQ_BYTE);
 
     irq_context->pending_capture = false;
+    pio_interrupt_clear(irq_context->pio, IRQ_FRAME_DONE);
+    irq_clear(PIO_IRQ_NUM(irq_context->pio, IRQ_FRAME_DONE));
 }
 
 void ov2640_init(struct ov2640_config *config) {
@@ -61,15 +66,15 @@ void ov2640_init(struct ov2640_config *config) {
 
     camera_pio_setup_gpios(config->pio, config->frame_sm, config->pin_y2_pio_base); //any non-init'ed SM works
 
-    image_frame_capture_init(config->pio, config->frame_sm, offset_frame_capture, config->pin_y2_pio_base);
-    image_byte_capture_init(config->pio, config->byte_sm, config->byte_prog_offs, config->pin_y2_pio_base);
-
+    //enable PIO interrupts for frame capture SM
     irq_set_enabled(PIO0_IRQ_0, true);
-    irq_set_enabled(PIO0_IRQ_1, true);
 
     irq_context = config; //any better way to do this?
-    irq_set_exclusive_handler(PIO0_IRQ_1, frame_done_isr);
+    irq_set_exclusive_handler(PIO0_IRQ_0, frame_done_isr);
     config->pending_capture = false;
+
+    image_frame_capture_init(config->pio, config->frame_sm, config->frame_prog_offs, config->pin_y2_pio_base);
+    image_byte_capture_init(config->pio, config->byte_sm, config->byte_prog_offs, config->pin_y2_pio_base);
 }
 
 void ov2640_frame_capture(struct ov2640_config *config, bool blocking) {
@@ -84,21 +89,20 @@ void ov2640_frame_capture(struct ov2640_config *config, bool blocking) {
         config->image_buf,
         &config->pio->rxf[config->byte_sm], //the byte SM outputs the data
         config->image_buf_size,
-        true //start right away, frame synchronization is handled by PIO
+        true
     );
 
-    // Wait for vsync rising edge to start frame
-    // while (gpio_get(config->pin_vsync) == true);
-    // while (gpio_get(config->pin_vsync) == false);
-
     //trigger_frame_capture clears IRQ_FRAME_REQ, starting the capture of a frame
-    trigger_frame_capture(config->pio);
+    trigger_frame_capture(config->pio, config->frame_sm, 240, 320);
     irq_context->pending_capture = true;
 
-    if(blocking) { //wait until IRQ_FRAME_DONE is triggered
-        while(config->pending_capture)
-            tight_loop_contents();
-    }
+    //if blocking, wait for frame finish
+    // while(blocking && config->pending_capture){
+    //     volatile uint rem = dma_hw->ch[config->dma_channel].transfer_count;
+    // }
+
+    dma_channel_wait_for_finish_blocking(config->dma_channel);
+        // tight_loop_contents();
 
 }
 
