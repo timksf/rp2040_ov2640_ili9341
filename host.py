@@ -13,6 +13,9 @@ CMD_CAPTURE = 0xCC
 ser = serial.Serial(sys.argv[1], 1000000)
 atexit.register(lambda: ser.close())
 
+FRAME_WIDTH  = 352
+FRAME_HEIGHT = 288
+
 # ======================
 # Actual device commands
 # ======================
@@ -44,9 +47,9 @@ def capture(filename):
 
     ser.write(struct.pack('B', CMD_CAPTURE))
 
-    raw = ser.read(320*240*2)
+    raw = ser.read(FRAME_WIDTH*FRAME_HEIGHT*2)
     
-    img = Image.new('RGB', (320, 240))
+    img = Image.new('RGB', (FRAME_WIDTH, FRAME_HEIGHT))
     width, height = img.size
     data = img.load()
 

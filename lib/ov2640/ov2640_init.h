@@ -258,8 +258,10 @@ static const uint8_t ov2640_uxga_cif[][2] = {
     {0x5a, 0x58},   
     {0x5b, 0x48},   
     {0x5c, 0x00},   
-    {0xd3, 0x08},   
-    {0xe0, 0x00}   
+    {0xd3, 0x10},   
+    {0xe0, 0x00},
+    // {0xff, 0x01},
+    // {0x11, 1 << 7} //enable frequency doubler because of only 12MHz MCLK
 };   
 
 /* Initialization sequence for QVGA resolution (320x240) */

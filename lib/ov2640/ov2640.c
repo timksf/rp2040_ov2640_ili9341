@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <inttypes.h>
 
 #include "ov2640.h"
 #include "ov2640_init.h"
@@ -6,11 +7,13 @@
 #include "hardware/i2c.h"
 #include "hardware/pwm.h"
 #include "image.pio.h"
+#include "pico/time.h"
 
 #define PIO_IRQ_NUM(pio, irq_index) ((pio == pio0) ? PIO0_IRQ_0 + (irq_index) : PIO1_IRQ_0 + (irq_index))
 
 static const uint8_t OV2640_ADDR = 0x60 >> 1;
 struct ov2640_config *volatile irq_context;
+static uint32_t last_frame = 0;
 
 static void frame_done_isr(void) {
     if(irq_context == NULL) 
@@ -25,6 +28,15 @@ static void frame_done_isr(void) {
     irq_context->pending_capture = false;
     pio_interrupt_clear(irq_context->pio, IRQ_FRAME_DONE);
     irq_clear(PIO_IRQ_NUM(irq_context->pio, IRQ_FRAME_DONE));
+}
+
+static void frame_sync_isr(void) {
+    uint32_t time = to_ms_since_boot(get_absolute_time());
+    uint32_t frame_time = time - last_frame;
+    last_frame = time;
+    printf("Frame time: %" PRIuFAST32 " ms\n", frame_time);
+    pio_interrupt_clear(irq_context->pio, 2); //interrupt is SM number here
+    irq_clear(PIO_IRQ_NUM(irq_context->pio, IRQ_FRAME_SYNC));
 }
 
 void ov2640_init(struct ov2640_config *config) {
@@ -54,7 +66,8 @@ void ov2640_init(struct ov2640_config *config) {
     sleep_ms(100);
 
     // Initialise the camera itself over SCCB
-    ov2640_regs_write(config, ov2640_qvga);
+    ov2640_regs_write(config, ov2640_vga);
+	ov2640_regs_write(config, ov2640_uxga_cif);
 
     // Set RGB565 output mode
     ov2640_reg_write(config, 0xff, 0x00);
@@ -64,17 +77,25 @@ void ov2640_init(struct ov2640_config *config) {
     config->frame_prog_offs = pio_add_program(config->pio, &image_frame_capture_program);
     config->byte_prog_offs = pio_add_program(config->pio, &image_byte_capture_program);
 
-    camera_pio_setup_gpios(config->pio, config->frame_sm, config->pin_y2_pio_base); //any non-init'ed SM works
+    //setup the GPIOS via a PIO program executed on any non-init'ed PIO SM
+    camera_pio_setup_gpios(config->pio, config->frame_sm, config->pin_y2_pio_base);
 
     //enable PIO interrupts for frame capture SM
-    irq_set_enabled(PIO0_IRQ_0, true);
+    irq_set_enabled(PIO_IRQ_NUM(config->pio, IRQ_FRAME_DONE), true);
 
     irq_context = config; //any better way to do this?
-    irq_set_exclusive_handler(PIO0_IRQ_0, frame_done_isr);
+    irq_set_exclusive_handler(PIO_IRQ_NUM(config->pio, IRQ_FRAME_DONE), frame_done_isr);
     config->pending_capture = false;
 
     image_frame_capture_init(config->pio, config->frame_sm, config->frame_prog_offs, config->pin_y2_pio_base);
     image_byte_capture_init(config->pio, config->byte_sm, config->byte_prog_offs, config->pin_y2_pio_base);
+
+    ///-------------TESTING-------------
+    irq_set_enabled(PIO0_IRQ_1, true);
+    irq_set_exclusive_handler(PIO0_IRQ_1, frame_sync_isr);
+    uint offs = pio_add_program(config->pio, &frame_sync_program);
+    frame_sync_init(config->pio, 2, offs, config->pin_y2_pio_base);
+    // pio_sm_set_jmp_pin(config->pio, 2, config->pin_y2_pio_base + OFFS_VSYNC);
 }
 
 void ov2640_frame_capture(struct ov2640_config *config, bool blocking) {
@@ -84,6 +105,8 @@ void ov2640_frame_capture(struct ov2640_config *config, bool blocking) {
     channel_config_set_dreq(&c, pio_get_dreq(config->pio, config->byte_sm, false));
     channel_config_set_transfer_data_size(&c, DMA_SIZE_8);
     
+    pio_sm_clear_fifos(config->pio, config->byte_sm);
+
     dma_channel_configure(
         config->dma_channel, &c,
         config->image_buf,
@@ -93,16 +116,16 @@ void ov2640_frame_capture(struct ov2640_config *config, bool blocking) {
     );
 
     //trigger_frame_capture clears IRQ_FRAME_REQ, starting the capture of a frame
-    trigger_frame_capture(config->pio, config->frame_sm, 240, 320);
+    trigger_frame_capture(config->pio, config->frame_sm, 1, 1);
     irq_context->pending_capture = true;
 
     //if blocking, wait for frame finish
     // while(blocking && config->pending_capture){
     //     volatile uint rem = dma_hw->ch[config->dma_channel].transfer_count;
+    // tight_loop_contents();
     // }
 
     dma_channel_wait_for_finish_blocking(config->dma_channel);
-        // tight_loop_contents();
 
 }
 

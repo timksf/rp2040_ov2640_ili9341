@@ -1,10 +1,13 @@
 
-.define OFFS_PCLK               8   //
-.define OFFS_HREF               9   //
-.define OFFS_VSYNC              10  //
+.define PUBLIC OFFS_PCLK               8   //
+.define PUBLIC OFFS_HREF               9   //
+.define PUBLIC OFFS_VSYNC              10  //
 .define PUBLIC IRQ_BYTE         4   //IRQ indices 4-7 are only visible to SMs
 .define PUBLIC IRQ_FRAME_DONE   0
-.define DEBOUNCE_COUNT          2 //cycles for VSYNC debouncing
+.define PUBLIC IRQ_FRAME_SYNC   1
+
+
+.define PUBLIC DEBOUNCE_COUNT   125000000 //cycles for VSYNC debouncing
 
 
 .program image_byte_capture
@@ -20,24 +23,23 @@
 .wrap
 
 .program image_frame_capture
-    set pindirs, 0    ; Set the direction for the VSYNC pin (0 for input)
-    set pins, OFFS_VSYNC ; Set the specific pin to monitor for jmp pin
 .wrap_target
     pull                        ;wait for frame request token
-debounce_vsync:
-    wait 1 pin OFFS_VSYNC       ; wait for VSYNC rising edge (start of frame)
-    set x, DEBOUNCE_COUNT       ; set debounce counter
-debounce_loop:
-    jmp x-- debounce_loop       ; loop until counter reaches zero
-    jmp pin debounce_done       ; check if pin is stable (still high)
-    jmp debounce_vsync          ; if pin was not stable, start over
-debounce_done:
+    wait 1 pin OFFS_VSYNC       ;wait for VSYNC rising edge (start of frame)
+    wait 0 pin OFFS_VSYNC       
+    wait 1 pin OFFS_VSYNC       
     irq wait IRQ_BYTE           ;trigger SM for byte capture
-    wait 0 pin OFFS_VSYNC       ;
+    wait 0 pin OFFS_VSYNC
     wait 1 pin OFFS_VSYNC       ;let byte capture run until next VSYNC
     irq set IRQ_FRAME_DONE      ;signal frame finish to CPU and wait
-
     ;after clearing the interrupt, the CPU should restart the byte capture SM
+.wrap
+
+.program frame_sync
+.wrap_target
+    wait 1 pin OFFS_VSYNC   ;wait for rising edge
+    wait 0 pin OFFS_VSYNC
+    irq wait 0 rel          ;triggers PIO interrupt number with SM index
 .wrap
 
 % c-sdk {
@@ -69,10 +71,39 @@ void image_frame_capture_init(PIO pio, uint sm, uint offset, uint pin_base) {
     pio_sm_set_enabled(pio, sm, true);
 }
 
+void frame_sync_init(PIO pio, uint sm, uint offset, uint pin_base) {
+    pio_sm_config c = frame_sync_program_get_default_config(offset);
+    sm_config_set_in_pins(&c, pin_base);
+    sm_config_set_jmp_pin(&c, pin_base + OFFS_VSYNC);
+
+    pio_set_irq1_source_enabled(pio, pis_interrupt0 + sm, true);
+    pio_interrupt_clear(pio, IRQ_FRAME_SYNC);
+
+    pio_sm_init(pio, sm, offset, &c);
+    pio_sm_set_enabled(pio, sm, true);
+    ; pio_sm_put(pio, sm, DEBOUNCE_COUNT);
+}
+
 static inline void trigger_frame_capture(PIO pio, uint sm, uint rows, uint cols) {
     pio_interrupt_clear(pio, IRQ_FRAME_DONE);
     pio_sm_put_blocking(pio, sm, 1); //start token
-    ; pio_sm_put_blocking(pio, sm, cols-1);
 }
 
 %}
+
+
+
+; idle0:
+;     wait 1 pin OFFS_VSYNC   ;wait for rising edge
+;     mov x OSR               ;reset X to debounce count from OSR
+; checkedge_rising:
+;     jmp pin debounce        ;if pin is still 1, stay in debounce loop
+;     jmp idle0               ;else go back to idle (signal only bounced to 1)
+; debounce:
+;     jmp x-- checkedge_rising
+; idle1:
+;     wait 0 pin OFFS_VSYNC   ;now wait for falling edge 5before triggering interrupt
+;     mov x OSR               ;reset X to debounce count from OSR
+; checkedge_falling:
+;     jmp pin idle1           ;if signal only bounced to 0, go back
+;     jmp x-- checkedge_falling;else, keep checking for debounce
