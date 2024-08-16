@@ -34,9 +34,18 @@ static void frame_sync_isr(void) {
     uint32_t time = to_ms_since_boot(get_absolute_time());
     uint32_t frame_time = time - last_frame;
     last_frame = time;
-    printf("Frame time: %" PRIuFAST32 " ms\n", frame_time);
+    // printf("Frame time: %" PRIuFAST32 " ms\n", frame_time);
     pio_interrupt_clear(irq_context->pio, 2); //interrupt is SM number here
     irq_clear(PIO_IRQ_NUM(irq_context->pio, IRQ_FRAME_SYNC));
+
+    if(irq_context->pending_capture) {
+        // pio_sm_set_enabled(irq_context->pio, irq_context->byte_sm, false);
+        // pio_sm_restart(irq_context->pio, irq_context->byte_sm);
+        // pio_sm_clear_fifos(irq_context->pio, irq_context->byte_sm);
+        dma_channel_start(irq_context->dma_channel);
+        // pio_sm_set_enabled(irq_context->pio, irq_context->byte_sm, true);
+        irq_context->pending_capture = false;
+    }
 }
 
 void ov2640_init(struct ov2640_config *config) {
@@ -104,26 +113,17 @@ void ov2640_frame_capture(struct ov2640_config *config, bool blocking) {
     channel_config_set_write_increment(&c, true);
     channel_config_set_dreq(&c, pio_get_dreq(config->pio, config->byte_sm, false));
     channel_config_set_transfer_data_size(&c, DMA_SIZE_8);
-    
-    pio_sm_clear_fifos(config->pio, config->byte_sm);
 
     dma_channel_configure(
         config->dma_channel, &c,
         config->image_buf,
         &config->pio->rxf[config->byte_sm], //the byte SM outputs the data
         config->image_buf_size,
-        true
+        false
     );
 
-    //trigger_frame_capture clears IRQ_FRAME_REQ, starting the capture of a frame
-    trigger_frame_capture(config->pio, config->frame_sm, 1, 1);
     irq_context->pending_capture = true;
-
-    //if blocking, wait for frame finish
-    // while(blocking && config->pending_capture){
-    //     volatile uint rem = dma_hw->ch[config->dma_channel].transfer_count;
-    // tight_loop_contents();
-    // }
+    //the DMA is now started with the next VSYNC interrupt
 
     dma_channel_wait_for_finish_blocking(config->dma_channel);
 

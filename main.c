@@ -107,15 +107,14 @@ bool timer_callback(__unused struct repeating_timer *t);
     volatile dma_debug_hw_t *volatile dma_dbg = dma_debug_hw;
 
     while(1){
-        // uint8_t cmd;
-        // uart_read_blocking(UART_INST, &cmd, 1);
+        uint8_t cmd;
+        uart_read_blocking(UART_INST, &cmd, 1);
 
-        // if (cmd == CMD_CAPTURE) {
-        //     ov2640_frame_capture(&cam_config, true);
-        //     uart_write_blocking(UART_INST, cam_config.image_buf, cam_config.image_buf_size);
-        // }
+        if (cmd == CMD_CAPTURE) {
+            ov2640_frame_capture(&cam_config, true);
+            uart_write_blocking(UART_INST, cam_config.image_buf, cam_config.image_buf_size);
+        }
 
-        // dma_channel_wait_for_finish_blocking(cam_config.dma_channel);
         // ili9341_write_frame(&lcd_config, 0, 0, ILI9341_TFTHEIGHT, ILI9341_TFTWIDTH, frame_buf);
     }
 }

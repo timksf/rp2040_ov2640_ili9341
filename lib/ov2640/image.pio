@@ -11,7 +11,7 @@
 
 
 .program image_byte_capture
-    wait 1 irq IRQ_BYTE     ;wait to be triggered, then continuously read out bytes
+    ; wait 1 irq IRQ_BYTE     ;wait to be triggered, then continuously read out bytes
 .wrap_target
     wait 1 pin OFFS_HREF    ;wait for href
     wait 1 pin OFFS_PCLK    ;wait for rising pclk
@@ -25,14 +25,14 @@
 .program image_frame_capture
 .wrap_target
     pull                        ;wait for frame request token
-    wait 1 pin OFFS_VSYNC       ;wait for VSYNC rising edge (start of frame)
-    wait 0 pin OFFS_VSYNC       
-    wait 1 pin OFFS_VSYNC       
-    irq wait IRQ_BYTE           ;trigger SM for byte capture
-    wait 0 pin OFFS_VSYNC
-    wait 1 pin OFFS_VSYNC       ;let byte capture run until next VSYNC
-    irq set IRQ_FRAME_DONE      ;signal frame finish to CPU and wait
-    ;after clearing the interrupt, the CPU should restart the byte capture SM
+    ; wait 1 pin OFFS_VSYNC       ;wait for VSYNC rising edge (start of frame)
+    ; wait 0 pin OFFS_VSYNC       
+    ; wait 1 pin OFFS_VSYNC       
+    ; irq wait IRQ_BYTE           ;trigger SM for byte capture
+    ; wait 0 pin OFFS_VSYNC
+    ; wait 1 pin OFFS_VSYNC       ;let byte capture run until next VSYNC
+    ; irq set IRQ_FRAME_DONE      ;signal frame finish to CPU and wait
+    ; ;after clearing the interrupt, the CPU should restart the byte capture SM
 .wrap
 
 .program frame_sync
