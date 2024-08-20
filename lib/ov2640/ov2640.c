@@ -6,6 +6,7 @@
 #include "hardware/dma.h"
 #include "hardware/i2c.h"
 #include "hardware/pwm.h"
+#include "hardware/gpio.h"
 #include "image.pio.h"
 #include "pico/time.h"
 
@@ -34,7 +35,7 @@ static void frame_sync_isr(void) {
     uint32_t time = to_ms_since_boot(get_absolute_time());
     uint32_t frame_time = time - last_frame;
     last_frame = time;
-    // printf("Frame time: %" PRIuFAST32 " ms\n", frame_time);
+    printf("Frame time: %" PRIuFAST32 " ms\n", frame_time);
     pio_interrupt_clear(irq_context->pio, 2); //interrupt is SM number here
     irq_clear(PIO_IRQ_NUM(irq_context->pio, IRQ_FRAME_SYNC));
 
@@ -74,13 +75,18 @@ void ov2640_init(struct ov2640_config *config) {
     gpio_put(config->pin_resetb, 1);
     sleep_ms(100);
 
+    ov2640_sreset(config);
+    sleep_ms(100);
     // Initialise the camera itself over SCCB
-    ov2640_regs_write(config, ov2640_vga);
-	ov2640_regs_write(config, ov2640_uxga_cif);
+    // ov2640_regs_write(config, ov2640_vga);
+	// ov2640_regs_write(config, ov2640_uxga_cif);
+    ov2640_regs_write(config, ov2640_settings_cif);
+    ov2640_regs_write(config, ov2640_size_cif);
+    ov2640_regs_write(config, ov2640_settings_rgb565);
 
     // Set RGB565 output mode
-    ov2640_reg_write(config, 0xff, 0x00);
-    ov2640_reg_write(config, 0xDA, (ov2640_reg_read(config, 0xDA) & 0xC) | 0x8);
+    // ov2640_reg_write(config, 0xff, 0x00);
+    // ov2640_reg_write(config, 0xDA, (ov2640_reg_read(config, 0xDA) & 0xC) | 0x8);
 
     // Enable image RX PIO
     config->frame_prog_offs = pio_add_program(config->pio, &image_frame_capture_program);
@@ -88,6 +94,8 @@ void ov2640_init(struct ov2640_config *config) {
 
     //setup the GPIOS via a PIO program executed on any non-init'ed PIO SM
     camera_pio_setup_gpios(config->pio, config->frame_sm, config->pin_y2_pio_base);
+    gpio_pull_up(config->pin_vsync);
+
 
     //enable PIO interrupts for frame capture SM
     irq_set_enabled(PIO_IRQ_NUM(config->pio, IRQ_FRAME_DONE), true);
@@ -156,7 +164,7 @@ void ov2640_regs_write(struct ov2640_config *config, const uint8_t (*regs_list)[
 		uint8_t reg = (*regs_list)[0];
 		uint8_t value = (*regs_list)[1];
 
-		if (reg == 0x00 && value == 0x00) {
+		if (reg == 0xff && value == 0xff) {
 			break;
 		}
 
@@ -179,3 +187,4 @@ uint16_t ov2640_read_id(struct ov2640_config *config) {
     uint16_t pid = ((uint16_t) pidh) << 8 | pidl;
     return pid;
 }
+

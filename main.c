@@ -2,6 +2,7 @@
 #include <tusb.h>
 #include "pico/stdlib.h"
 #include "ov2640.h"
+#include "ov2640_regs.h"
 #include "ili9341.h"
 #include "hardware/dma.h"
 // #include "img.h"
@@ -40,10 +41,10 @@ uint16_t frame_buf[FRAME_WIDTH*FRAME_HEIGHT];
 //forward declaration of callbacks  
 bool timer_callback(__unused struct repeating_timer *t);
 
- int main() {
+int main() {
     stdio_init_all(); //will only init what is enabled in the CMakeLists file
 
-    uart_init(UART_INST, 1000000);
+    uart_init(UART_INST, 500000);
     gpio_set_function(20, GPIO_FUNC_UART);
     gpio_set_function(21, GPIO_FUNC_UART);
 
@@ -68,7 +69,7 @@ bool timer_callback(__unused struct repeating_timer *t);
     cam_config.pin_sioc = PIN_CAM_SIOC;
     cam_config.pin_siod = PIN_CAM_SIOD;
     cam_config.pin_resetb = PIN_CAM_RESETB;
-    // cam_config.pin_xclk = -1;
+    cam_config.pin_xclk = -1;
     cam_config.pin_vsync = PIN_CAM_VSYNC;
     cam_config.pin_y2_pio_base = PIN_CAM_Y2_PIO_BASE;
     cam_config.pio = CAM_PIO_INST;
@@ -88,9 +89,9 @@ bool timer_callback(__unused struct repeating_timer *t);
     // ili9341_write_frame(&lcd_config, 0, 0, ILI9341_TFTHEIGHT, ILI9341_TFTWIDTH, frame_buf);
 
     // after setup wait for serial terminal connection on USB port
-    while (!tud_cdc_connected()) { 
-        sleep_ms(100);
-    }
+    // while (!tud_cdc_connected()) { 
+    //     sleep_ms(100);
+    // }
 
     ov2640_init(&cam_config);
     uint16_t cam_id = ov2640_read_id(&cam_config);
@@ -105,6 +106,20 @@ bool timer_callback(__unused struct repeating_timer *t);
     add_repeating_timer_ms(-1000, timer_callback, NULL, &timer);
 
     volatile dma_debug_hw_t *volatile dma_dbg = dma_debug_hw;
+
+    //colorbar
+    // ov2640_reg_write(&cam_config, 0xFF, 0x01);
+    // uint8_t com7 = ov2640_reg_read(&cam_config, 0x12);
+    // com7 |= 0x02; //enable test pattern
+    // ov2640_reg_write(&cam_config, 0x12, com7);
+
+    // //hflip
+    ov2640_reg_write(&cam_config, 0xFF, 0x01);
+    volatile uint8_t reg04 = ov2640_reg_read(&cam_config, 0x04);
+    volatile uint8_t com3 = ov2640_reg_read(&cam_config, COM3);
+    volatile uint8_t com1 = ov2640_reg_read(&cam_config, COM1);
+
+
 
     while(1){
         uint8_t cmd;

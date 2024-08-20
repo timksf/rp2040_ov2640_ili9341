@@ -10,7 +10,7 @@ CMD_REG_WRITE = 0xAA
 CMD_REG_READ = 0xBB
 CMD_CAPTURE = 0xCC
 
-ser = serial.Serial(sys.argv[1], 1000000)
+ser = serial.Serial(sys.argv[1], 500000)
 atexit.register(lambda: ser.close())
 
 FRAME_WIDTH  = 352

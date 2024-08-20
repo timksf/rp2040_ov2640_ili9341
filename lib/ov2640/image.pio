@@ -37,8 +37,8 @@
 
 .program frame_sync
 .wrap_target
-    wait 1 pin OFFS_VSYNC   ;wait for rising edge
     wait 0 pin OFFS_VSYNC
+    wait 1 pin OFFS_VSYNC   ;wait for rising edge
     irq wait 0 rel          ;triggers PIO interrupt number with SM index
 .wrap
 
