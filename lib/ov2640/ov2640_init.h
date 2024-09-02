@@ -706,7 +706,7 @@ const uint8_t ov2640_settings_cif[][2] = {
     {0x46, 0x3f},
     {0x3c, 0x32},
     {COM1, 0x06},
-    {CLKRC, CLKRC_DIV(1)}, //12MHz internal clock for DIV=1
+    {CLKRC, CLKRC_2X | CLKRC_DIV(1)}, //12MHz internal clock for DIV=1
     {COM2, COM2_OUT_DRIVE_3x},
     {COM3, 0x38 | COM3_BAND_AUTO},
     {REG04, REG04_DEFAULT},

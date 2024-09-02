@@ -104,17 +104,47 @@ $CLK = \begin{cases}2\cdot \frac{XVCLK}{DIV} &CLKRC[7]\\\frac{XVCLK}{DIV}&\neg C
 
 $PCLK = \begin{cases} \frac{SYSCLK (48)}{R\_DVP\_SP} &YUV / RGB\\ \frac{SYSCLK (48)}{ (2*R\_DVP\_SP)} &RAW\end{cases}$
 
+It is not clear what the 48 is supposed to mean and whether SYSCLK refers to CLK or some other clock signal.
 
+There are no equations for framerate calculations, only these for slave mode:
 #### UXGA
 $T_{line} = 1922 \times T_{clk}$
 
-$T_{frame} = 1248 \times T_{clk}$
+$T_{frame} = 1248 \times T_{line}$
 #### SVGA
 $T_{line} = 1190 \times T_{clk}$
 
-$T_{frame} = 672 \times T_{clk}$
+$T_{frame} = 672 \times T_{line}$
 #### CIF
 $T_{line} = 595 \times T_{clk}$
 
-$T_{frame} = 336 \times T_{clk}$
+$T_{frame} = 336 \times T_{line}$
 
+Here, $T_{clk}$ refers to the supplied MCLK in slave mode.
+
+
+### Framerate
+
+The "datasheet" lists a few different options for controlling the framerate:
+1) CLKRC, so defining a clock prescaler
+2) dummy pixels per line, so slowing down the individual line transmission by some amount
+3) entire dummy lines which are transmitted with each frame
+
+Option 1) seems to be the most sane option, while the other options appear to only be relevant for finer framerate adjustments. Unsurprisingly, there is no equation for framerate calculations in the normal (non-slave) mode.
+
+The framerate can be measured with an interrupt on the VSYNC line, we document some framerates in the hopes of being able to figure out exact register settings later on:
+
+Our live preview is supposed to show CIF with some high enough fps value to feel responsive, some experiments:
+```c
+General:
+CIF; RGB565; XVCLK=12MHz; R_DVP_SP=R_DVP_SP_AUTO_MODE (auto PCLK freq.)
+
+CLKRC=0x00 => 40ms frametime, 25 fps
+CLKRC=0x01 => 80ms frametime, 12.5 fps
+CLKRC=0x02 => 120ms frametime, 8.33 fps
+CLKRC=0x03 => 160ms frametime, 6.25 fps
+
+CLKRC=0x80 => 20ms frametime, 50 fps
+CLKRC=0x81 => 40ms frametime, 25 fps
+
+```

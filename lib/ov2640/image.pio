@@ -6,7 +6,6 @@
 .define PUBLIC IRQ_FRAME_DONE   0
 .define PUBLIC IRQ_FRAME_SYNC   1
 
-
 .define PUBLIC DEBOUNCE_COUNT   125000000 //cycles for VSYNC debouncing
 
 
