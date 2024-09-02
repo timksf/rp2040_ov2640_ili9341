@@ -14,10 +14,14 @@ project(ov2640_ili9341)
 # Initialise the Raspberry Pi Pico SDK
 pico_sdk_init()
 
+# executables
 add_executable(firmware main.c)
-
 pico_enable_stdio_uart(firmware 0)
 pico_enable_stdio_usb(firmware 1)
+
+add_executable(display_test display_main.c)
+pico_enable_stdio_uart(display_test 1)
+pico_enable_stdio_usb(display_test 0)
 
 add_subdirectory(lib/ili9341)
 add_subdirectory(lib/ov2640)
@@ -29,6 +33,11 @@ target_link_libraries(firmware
     ili9341
 )
 
+target_link_libraries(display_test 
+    pico_stdlib
+    ili9341
+)
+
 # Add the standard include files to the build
 # target_include_directories(firmware PRIVATE
 #   ${CMAKE_CURRENT_LIST_DIR}
@@ -36,4 +45,5 @@ target_link_libraries(firmware
 # )
 
 pico_add_extra_outputs(firmware)
+pico_add_extra_outputs(display_test)
 

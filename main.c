@@ -5,36 +5,9 @@
 #include "ov2640_regs.h"
 #include "ili9341.h"
 #include "hardware/dma.h"
+
+#include "main.h"
 // #include "img.h"
-
-#define UART_INST uart1
-#define CAM_I2C_INST i2c1
-#define LCD_SPI_INST spi0
-#define CAM_PIO_INST pio0
-#define CAM_FRAME_SM 0
-#define CAM_BYTE_SM 1
-
-#define FRAME_WIDTH 352
-#define FRAME_HEIGHT 288
-
-const int PIN_LED = 25;
-//LCD pin definitions
-const int PIN_LCD_DC = 0;
-const int PIN_LCD_RST = 1;
-const int PIN_LCD_CS = 5; //SPI0
-const int PIN_LCD_TX = 3;
-const int PIN_LCD_SCK = 2;
-//camera pin definitions
-const int PIN_CAM_SIOC = 27; //I2C1 SCL
-const int PIN_CAM_SIOD = 26; //I2C1 SDA
-const int PIN_CAM_RESETB = 22;
-// const int PIN_CAM_XCLK = 3;
-const int PIN_CAM_VSYNC = 16;
-const int PIN_CAM_Y2_PIO_BASE = 6;
-
-const uint8_t CMD_REG_WRITE = 0xAA;
-const uint8_t CMD_REG_READ = 0xBB;
-const uint8_t CMD_CAPTURE = 0xCC;
 
 uint16_t frame_buf[FRAME_WIDTH*FRAME_HEIGHT];
 
@@ -52,8 +25,8 @@ int main() {
     uart_set_format(UART_INST, 8, 1, UART_PARITY_NONE);
     uart_puts(UART_INST, "Hello from UART");
 
-    // for(int i = 0; i < ILI9341_TFTWIDTH*ILI9341_TFTHEIGHT; i++) 
-    //     frame_buf[i] = ILI9341_CYAN;
+    for(int i = 0; i < ILI9341_TFTWIDTH*ILI9341_TFTHEIGHT; i++) 
+        frame_buf[i] = ILI9341_CYAN;
     
     struct ili9341_config lcd_config;
     struct ov2640_config cam_config;
@@ -79,9 +52,9 @@ int main() {
     cam_config.image_buf = (uint8_t*)&frame_buf[0];
     cam_config.image_buf_size = sizeof(frame_buf);
 
-    // ili9341_init(&lcd_config);
-    // ili9341_set_rotation(&lcd_config,1); //"landscape mode"
-    // ili9341_write_frame(&lcd_config, 0, 0, ILI9341_TFTHEIGHT, ILI9341_TFTWIDTH, frame_buf);
+    ili9341_init(&lcd_config);
+    ili9341_set_rotation(&lcd_config,1); //"landscape mode"
+    ili9341_write_frame(&lcd_config, 0, 0, ILI9341_TFTHEIGHT, ILI9341_TFTWIDTH, frame_buf);
 
     // for(int i = 0; i < ILI9341_TFTWIDTH*ILI9341_TFTHEIGHT; i++) 
     //     frame_buf[i] = ILI9341_MAGENTA;
@@ -118,8 +91,6 @@ int main() {
     volatile uint8_t reg04 = ov2640_reg_read(&cam_config, 0x04);
     volatile uint8_t com3 = ov2640_reg_read(&cam_config, COM3);
     volatile uint8_t com1 = ov2640_reg_read(&cam_config, COM1);
-
-
 
     while(1){
         uint8_t cmd;
