@@ -8,30 +8,36 @@
 
 .define PUBLIC DEBOUNCE_COUNT   125000000 //cycles for VSYNC debouncing
 
-
-.program image_byte_capture
-    ; wait 1 irq IRQ_BYTE     ;wait to be triggered, then continuously read out bytes
+;This SM program captures a single frame, the amount of bytes has to be supplied to the TX FIFO
+.program image_frame_capture_sized
 .wrap_target
+    pull        ;to start frame capture, wait for number of bytes to capture
+    mov X, OSR  ;move OSR content into X register
+    ;when configuration is done, wait for VSYNC from camera
+    wait 0 pin OFFS_VSYNC       
+    wait 1 pin OFFS_VSYNC
+    wait 0 pin OFFS_HREF
+capture_loop:
     wait 1 pin OFFS_HREF    ;wait for href
     wait 1 pin OFFS_PCLK    ;wait for rising pclk
     in pins 8
     wait 0 pin OFFS_PCLK    ;wait for falling pclk
-
-    ;the byte capture SM does not know about the amount of bytes, it will just capture bytes until 
-    ;it is resetted, the DMA channel handles the frame sizes
+    ; wait 1 pin OFFS_PCLK    ;wait for rising pclk
+    ; in pins 8
+    ; wait 0 pin OFFS_PCLK    ;wait for falling pclk
+    jmp X-- capture_loop
 .wrap
 
-.program image_frame_capture
+;This SM program captures a single frame, the amount of pixels is handled by the DMA
+.program image_frame_capture_single 
+    wait 0 pin OFFS_VSYNC       
+    wait 1 pin OFFS_VSYNC       
 .wrap_target
-    pull                        ;wait for frame request token
-    ; wait 1 pin OFFS_VSYNC       ;wait for VSYNC rising edge (start of frame)
-    ; wait 0 pin OFFS_VSYNC       
-    ; wait 1 pin OFFS_VSYNC       
-    ; irq wait IRQ_BYTE           ;trigger SM for byte capture
-    ; wait 0 pin OFFS_VSYNC
-    ; wait 1 pin OFFS_VSYNC       ;let byte capture run until next VSYNC
-    ; irq set IRQ_FRAME_DONE      ;signal frame finish to CPU and wait
-    ; ;after clearing the interrupt, the CPU should restart the byte capture SM
+    ;capture bytes until DMA is happy
+    wait 1 pin OFFS_HREF    ;wait for href
+    wait 1 pin OFFS_PCLK    ;wait for rising pclk
+    in pins 8
+    wait 0 pin OFFS_PCLK    ;wait for falling pclk
 .wrap
 
 .program frame_sync
@@ -46,46 +52,43 @@ void camera_pio_setup_gpios(PIO pio, uint sm, uint pin_base) {
     pio_sm_set_consecutive_pindirs(pio, sm, pin_base, 10, false);
 }
 
-void image_byte_capture_init(PIO pio, uint sm, uint offset, uint pin_base) {
-    pio_sm_config c = image_byte_capture_program_get_default_config(offset);
+void image_frame_capture_sized_init(PIO pio, uint sm, uint offset, uint pin_base) {
+    pio_sm_config c = image_frame_capture_sized_program_get_default_config(offset);
     sm_config_set_in_pins(&c, pin_base);
     sm_config_set_in_shift(&c, false, true, 8); //auto push at 8 bit threshold
-    sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_RX); //no data output, use fifos as RX only
-
-    pio_interrupt_clear(pio, IRQ_BYTE);
 
     pio_sm_init(pio, sm, offset, &c);
     pio_sm_set_enabled(pio, sm, true);
 }
 
-void image_frame_capture_init(PIO pio, uint sm, uint offset, uint pin_base) {
-    pio_sm_config c = image_frame_capture_program_get_default_config(offset);
+void image_frame_capture_single_init(PIO pio, uint sm, uint offset, uint pin_base) {
+    pio_sm_config c = image_frame_capture_single_program_get_default_config(offset);
     sm_config_set_in_pins(&c, pin_base); //just set in pins so that we can use offset in `wait`
+    sm_config_set_in_shift(&c, false, true, 8); //auto push at 8 bit threshold
+    sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_RX); //no data output, use fifos as RX only
     
     ;//enable system level interrupt and make sure it's cleared
-    pio_set_irq0_source_enabled(pio, (enum pio_interrupt_source)(pis_interrupt0 + sm), true);
-    pio_interrupt_clear(pio, IRQ_FRAME_DONE);
+    ;// pio_set_irq0_source_enabled(pio, (enum pio_interrupt_source)(pis_interrupt0 + sm), true);
+    ;// pio_interrupt_clear(pio, IRQ_FRAME_DONE);
 
     pio_sm_init(pio, sm, offset, &c);
-    pio_sm_set_enabled(pio, sm, true);
+    ;// pio_sm_set_enabled(pio, sm, true);
 }
 
 void frame_sync_init(PIO pio, uint sm, uint offset, uint pin_base) {
     pio_sm_config c = frame_sync_program_get_default_config(offset);
     sm_config_set_in_pins(&c, pin_base);
-    sm_config_set_jmp_pin(&c, pin_base + OFFS_VSYNC);
+    ;//sm_config_set_jmp_pin(&c, pin_base + OFFS_VSYNC);
 
     pio_set_irq1_source_enabled(pio, pis_interrupt0 + sm, true);
     pio_interrupt_clear(pio, IRQ_FRAME_SYNC);
 
     pio_sm_init(pio, sm, offset, &c);
     pio_sm_set_enabled(pio, sm, true);
-    ; pio_sm_put(pio, sm, DEBOUNCE_COUNT);
 }
 
-static inline void trigger_frame_capture(PIO pio, uint sm, uint rows, uint cols) {
-    pio_interrupt_clear(pio, IRQ_FRAME_DONE);
-    pio_sm_put_blocking(pio, sm, 1); //start token
+static inline void trigger_frame_capture(PIO pio, uint sm, uint bytes) {
+    pio_sm_put_blocking(pio, sm, bytes);
 }
 
 %}

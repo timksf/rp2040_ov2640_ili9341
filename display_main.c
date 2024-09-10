@@ -6,6 +6,9 @@
 #include "main.h"
 // #include "img.h"
 
+#define FRAME_WIDTH 320
+#define FRAME_HEIGHT 240
+
 uint16_t frame_buf[FRAME_WIDTH*FRAME_HEIGHT];
 
 //forward declaration of callbacks  

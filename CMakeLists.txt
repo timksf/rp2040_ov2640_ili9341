@@ -23,6 +23,12 @@ add_executable(display_test display_main.c)
 pico_enable_stdio_uart(display_test 1)
 pico_enable_stdio_usb(display_test 0)
 
+add_executable(framecapture framecapture.c)
+pico_enable_stdio_uart(framecapture 0)
+pico_enable_stdio_usb(framecapture 1)
+
+add_executable(blinky blink.c)
+
 add_subdirectory(lib/ili9341)
 add_subdirectory(lib/ov2640)
 
@@ -33,9 +39,18 @@ target_link_libraries(firmware
     ili9341
 )
 
+target_link_libraries(framecapture 
+    pico_stdlib
+    ov2640
+)
+
 target_link_libraries(display_test 
     pico_stdlib
     ili9341
+)
+
+target_link_libraries(blinky 
+    pico_stdlib
 )
 
 # Add the standard include files to the build
@@ -45,5 +60,7 @@ target_link_libraries(display_test
 # )
 
 pico_add_extra_outputs(firmware)
+pico_add_extra_outputs(framecapture)
 pico_add_extra_outputs(display_test)
+pico_add_extra_outputs(blinky)
 

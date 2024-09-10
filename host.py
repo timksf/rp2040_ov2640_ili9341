@@ -9,16 +9,23 @@ import sys
 CMD_REG_WRITE = 0xAA
 CMD_REG_READ = 0xBB
 CMD_CAPTURE = 0xCC
+CMD_CAPTURE_JPEG = 0xDD
 
-ser = serial.Serial(sys.argv[1], 500000)
+ser = serial.Serial(sys.argv[1], 1000000)
 atexit.register(lambda: ser.close())
 
-FRAME_WIDTH  = 352
-FRAME_HEIGHT = 288
+FRAME_WIDTH  = 320
+FRAME_HEIGHT = 240
 
-# ======================
-# Actual device commands
-# ======================
+BUF_SIZE = 200 * 1024
+
+def transmit_test(c):
+    ser.reset_input_buffer()
+    ser.reset_output_buffer()
+    ser.write('S'.encode())
+    c = ser.read()
+    print(c.decode())
+
 def reg_write(reg, value):
     ser.reset_output_buffer()
     ser.reset_input_buffer()
@@ -66,6 +73,23 @@ def capture(filename):
             data[x, y] = (r, g, b)
 
     img.save(filename)
+
+def capture_jpeg(filename):
+    ser.reset_output_buffer()
+    ser.reset_input_buffer()
+
+    ser.write(struct.pack('B', CMD_CAPTURE_JPEG))
+
+    #for JPEG, expect H*W // 5 bytes
+    raw = ser.read(BUF_SIZE)
+    pos_EOI = raw.find(b"\xff\xd9")
+
+    with open("eee.bin", "wb") as binary_file:
+        binary_file.write(raw)
+
+    print(f"Found EOI at byte {pos_EOI:0d}")
+    # print(raw)
+    
 
 # =======
 # Helpers

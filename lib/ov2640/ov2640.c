@@ -13,44 +13,31 @@
 #define PIO_IRQ_NUM(pio, irq_index) ((pio == pio0) ? PIO0_IRQ_0 + (irq_index) : PIO1_IRQ_0 + (irq_index))
 
 static const uint8_t OV2640_ADDR = 0x60 >> 1;
-struct ov2640_config *volatile irq_context;
+ov2640_config_t *volatile irq_context;
 static uint32_t last_frame = 0;
-
-static void frame_done_isr(void) {
-    if(irq_context == NULL) 
-        return;
-    //jump to beginning so that byte SM waits for interrupt
-    pio_sm_exec(irq_context->pio, irq_context->byte_sm, pio_encode_jmp(irq_context->byte_prog_offs));
-    pio_sm_clear_fifos(irq_context->pio, irq_context->byte_sm);
-    //restart byte capture SM
-    pio_sm_restart(irq_context->pio, irq_context->byte_sm);
-    pio_interrupt_clear(irq_context->pio, IRQ_BYTE);
-
-    irq_context->pending_capture = false;
-    pio_interrupt_clear(irq_context->pio, IRQ_FRAME_DONE);
-    irq_clear(PIO_IRQ_NUM(irq_context->pio, IRQ_FRAME_DONE));
-}
 
 static void frame_sync_isr(void) {
     uint32_t time = to_ms_since_boot(get_absolute_time());
     uint32_t frame_time = time - last_frame;
     last_frame = time;
     printf("Frame time: %" PRIuFAST32 " ms\n", frame_time);
+
     pio_interrupt_clear(irq_context->pio, 2); //interrupt is SM number here
     irq_clear(PIO_IRQ_NUM(irq_context->pio, IRQ_FRAME_SYNC));
 
-    if(irq_context->pending_capture) {
-        // pio_sm_set_enabled(irq_context->pio, irq_context->byte_sm, false);
-        // pio_sm_restart(irq_context->pio, irq_context->byte_sm);
-        // pio_sm_clear_fifos(irq_context->pio, irq_context->byte_sm);
-        dma_channel_start(irq_context->dma_channel);
-        // pio_sm_set_enabled(irq_context->pio, irq_context->byte_sm, true);
-        irq_context->pending_capture = false;
-    }
+    // pio_sm_set_enabled(irq_context->pio, irq_context->frame_sm, false);
+    // pio_sm_clear_fifos(irq_context->pio, irq_context->frame_sm);
+
+    // pio_sm_restart(irq_context->pio, irq_context->frame_sm);
+    // pio_sm_exec(irq_context->pio, irq_context->frame_sm, pio_encode_jmp(irq_context->frame_prog_offs));
+    // pio_sm_set_enabled(irq_context->pio, irq_context->frame_sm, true);
+
+    //clear DMA interrupt
+    // dma_hw->ints0 = dma_hw->ints0;
 }
 
-void ov2640_init(struct ov2640_config *config) {
-    // XCLK generation (~20.83 MHz)
+void ov2640_init(ov2640_config_t *config) {
+    // XCLK generation
     if(config->pin_xclk >= 0) {
         gpio_set_function(config->pin_xclk, GPIO_FUNC_PWM);
         uint slice_num = pwm_gpio_to_slice_num(config->pin_xclk);
@@ -74,70 +61,124 @@ void ov2640_init(struct ov2640_config *config) {
     sleep_ms(100);
     gpio_put(config->pin_resetb, 1);
     sleep_ms(100);
-
+    //perform soft reset after hard reset
     ov2640_sreset(config);
     sleep_ms(100);
-    // Initialise the camera itself over SCCB
-    // ov2640_regs_write(config, ov2640_vga);
-	// ov2640_regs_write(config, ov2640_uxga_cif);
-    ov2640_regs_write(config, ov2640_settings_cif);
-    ov2640_regs_write(config, ov2640_size_cif);
-    ov2640_regs_write(config, ov2640_settings_rgb565);
 
-    // Set RGB565 output mode
-    // ov2640_reg_write(config, 0xff, 0x00);
-    // ov2640_reg_write(config, 0xDA, (ov2640_reg_read(config, 0xDA) & 0xC) | 0x8);
+    // Initialize the camera itself over SCCB
+    ov2640_regs_write(config, ov2640_settings_cif);
+    ov2640_set_framesize(config, FRAMESIZE_CIF);
 
     // Enable image RX PIO
-    config->frame_prog_offs = pio_add_program(config->pio, &image_frame_capture_program);
-    config->byte_prog_offs = pio_add_program(config->pio, &image_byte_capture_program);
+    config->frame_prog_offs = pio_add_program(config->pio, &image_frame_capture_single_program);
+    config->frame_sized_prog_offs = pio_add_program(config->pio, &image_frame_capture_sized_program);
 
     //setup the GPIOS via a PIO program executed on any non-init'ed PIO SM
     camera_pio_setup_gpios(config->pio, config->frame_sm, config->pin_y2_pio_base);
     gpio_pull_up(config->pin_vsync);
 
-
     //enable PIO interrupts for frame capture SM
     irq_set_enabled(PIO_IRQ_NUM(config->pio, IRQ_FRAME_DONE), true);
 
-    irq_context = config; //any better way to do this?
-    irq_set_exclusive_handler(PIO_IRQ_NUM(config->pio, IRQ_FRAME_DONE), frame_done_isr);
-    config->pending_capture = false;
-
-    image_frame_capture_init(config->pio, config->frame_sm, config->frame_prog_offs, config->pin_y2_pio_base);
-    image_byte_capture_init(config->pio, config->byte_sm, config->byte_prog_offs, config->pin_y2_pio_base);
+    image_frame_capture_single_init(config->pio, config->frame_sm, config->frame_prog_offs, config->pin_y2_pio_base);
+    image_frame_capture_sized_init(config->pio, config->frame_sized_sm, config->frame_sized_prog_offs, config->pin_y2_pio_base);
 
     ///-------------TESTING-------------
-    irq_set_enabled(PIO0_IRQ_1, true);
-    irq_set_exclusive_handler(PIO0_IRQ_1, frame_sync_isr);
+    irq_context = config;    
+    // irq_set_enabled(PIO0_IRQ_1, true);
+    // irq_set_exclusive_handler(PIO0_IRQ_1, frame_sync_isr);
     uint offs = pio_add_program(config->pio, &frame_sync_program);
     frame_sync_init(config->pio, 2, offs, config->pin_y2_pio_base);
     // pio_sm_set_jmp_pin(config->pio, 2, config->pin_y2_pio_base + OFFS_VSYNC);
 }
 
-void ov2640_frame_capture(struct ov2640_config *config, bool blocking) {
+void ov2640_frame_capture_single(ov2640_config_t *config, bool blocking) {
+    uint sm = config->frame_sized_sm;
+
     dma_channel_config c = dma_channel_get_default_config(config->dma_channel);
     channel_config_set_read_increment(&c, false);
     channel_config_set_write_increment(&c, true);
-    channel_config_set_dreq(&c, pio_get_dreq(config->pio, config->byte_sm, false));
+    channel_config_set_dreq(&c, pio_get_dreq(config->pio, sm, false));
     channel_config_set_transfer_data_size(&c, DMA_SIZE_8);
 
     dma_channel_configure(
         config->dma_channel, &c,
         config->image_buf,
-        &config->pio->rxf[config->byte_sm], //the byte SM outputs the data
-        config->image_buf_size,
+        &config->pio->rxf[sm],
+        config->frame_size_bytes,
         false
     );
 
-    irq_context->pending_capture = true;
-    //the DMA is now started with the next VSYNC interrupt
-
+    dma_channel_start(config->dma_channel);
+    trigger_frame_capture(config->pio, sm, config->frame_size_bytes-1);
     dma_channel_wait_for_finish_blocking(config->dma_channel);
 
+    // pio_sm_set_enabled(config->pio, sm, false);
+    // pio_sm_clear_fifos(config->pio, sm);
+
+    // pio_sm_restart(config->pio, sm);
+    // pio_sm_exec(config->pio, sm, pio_encode_jmp(config->frame_prog_offs));
+
+    // pio_sm_set_enabled(config->pio, sm, true);
+    // dma_channel_wait_for_finish_blocking(config->dma_channel);
 }
 
-void ov2640_reg_write(struct ov2640_config *config, uint8_t reg, uint8_t value) {
+void ov2640_frame_capture_continuous(ov2640_config_t *config) {
+    //This function sets up two DMA channels
+    //One DMA channel is responsible for moving the data from the PIO
+    //image capture SM to main memory
+    //The other DMA channel is responsible of restarting the other one, when it finishes
+    //It simply writes to the control registers of the other DMA channel when
+    //this channel triggers its "finish" interrupt
+
+    //first, construct the control DMA 
+    uint ctrl_channel = dma_claim_unused_channel(true);
+    dma_channel_config c = dma_channel_get_default_config(ctrl_channel);
+    channel_config_set_transfer_data_size(&c, DMA_SIZE_32);
+    channel_config_set_read_increment(&c, false);
+    channel_config_set_write_increment(&c, false);
+    channel_config_set_chain_to(&c, config->dma_channel);
+    dma_channel_configure(
+        ctrl_channel, &c, 
+        &dma_hw->ch[config->dma_channel].write_addr, //reset the write address after each completed DMA transfer
+        &config->image_buf, //the write_addr is reset to the beginning of the frame buffer
+        1, //write a single address, so a single word
+        false
+    );
+
+    //now, construct the data DMA, same as for capturing single frames
+    dma_channel_config c1 = dma_channel_get_default_config(config->dma_channel);
+    channel_config_set_read_increment(&c1, false);
+    channel_config_set_write_increment(&c1, true);
+    channel_config_set_dreq(&c1, pio_get_dreq(config->pio, config->frame_sm, false));
+    channel_config_set_transfer_data_size(&c1, DMA_SIZE_8);
+    channel_config_set_chain_to(&c1, ctrl_channel);
+    dma_channel_configure(
+        config->dma_channel, &c1,
+        config->image_buf,
+        &config->pio->rxf[config->frame_sm],
+        config->frame_size_bytes,
+        false
+    );
+
+    //raise DMA_IRQ_0 when data channel finishes
+    dma_channel_set_irq0_enabled(ctrl_channel, true);
+    irq_set_enabled(DMA_IRQ_0, true);
+    irq_set_exclusive_handler(DMA_IRQ_0, frame_sync_isr);
+
+    //perform proper reset of frame capture SM 
+    pio_sm_set_enabled(config->pio, config->frame_sm, false);
+    pio_sm_clear_fifos(config->pio, config->frame_sm);
+
+    pio_sm_restart(config->pio, config->frame_sm);
+    pio_sm_exec(config->pio, config->frame_sm, pio_encode_jmp(config->frame_prog_offs));
+    pio_sm_set_enabled(config->pio, config->frame_sm, true);
+
+    //start control channel!
+    dma_channel_start(ctrl_channel);
+}
+
+void ov2640_reg_write(ov2640_config_t *config, uint8_t reg, uint8_t value) {
     uint8_t data[] = {reg, value};
     int err = i2c_write_blocking(config->sccb, OV2640_ADDR, data, sizeof(data), false);
     if(err == PICO_ERROR_GENERIC){
@@ -145,7 +186,7 @@ void ov2640_reg_write(struct ov2640_config *config, uint8_t reg, uint8_t value) 
     }
 }
 
-uint8_t ov2640_reg_read(struct ov2640_config *config, uint8_t reg) {
+uint8_t ov2640_reg_read(ov2640_config_t *config, uint8_t reg) {
     i2c_write_blocking(config->sccb, OV2640_ADDR, &reg, 1, false);
 
     uint8_t value;
@@ -154,33 +195,29 @@ uint8_t ov2640_reg_read(struct ov2640_config *config, uint8_t reg) {
     return value;
 }
 
-void ov2640_regs_write(struct ov2640_config *config, const uint8_t (*regs_list)[2]) {
-    // for(uint32_t idx = 0; idx < sizeof(regs_list)/2; idx++) {
-    //     uint8_t reg = regs_list[idx][0];
-    //     uint8_t value = regs_list[idx][1];
-    //     ov2640_reg_write(config, reg, value);
-    // }
+void ov2640_regs_write(ov2640_config_t *config, const uint8_t (*regs_list)[2]) {
     while (1) {
-		uint8_t reg = (*regs_list)[0];
-		uint8_t value = (*regs_list)[1];
+        uint8_t reg = (*regs_list)[0];
+        uint8_t value = (*regs_list)[1];
 
-		if (reg == 0xff && value == 0xff) {
-			break;
-		}
+        if (reg == 0xff && value == 0xff) {
+            //ENDMARKER detected
+            break;
+        }
 
-		ov2640_reg_write(config, reg, value);
+        ov2640_reg_write(config, reg, value);
 
-		regs_list++;
-	}
+        regs_list++;
+    }
 }
 
-void ov2640_sreset(struct ov2640_config *config) {
+void ov2640_sreset(ov2640_config_t *config) {
     ov2640_reg_write(config, 0xFF, 0x01); //select camera registers
     ov2640_reg_write(config, 0x12, 0x80); //soft reset via COM7 register
     sleep_ms(10);
 }
 
-uint16_t ov2640_read_id(struct ov2640_config *config) {
+uint16_t ov2640_read_id(ov2640_config_t *config) {
     ov2640_reg_write(config, 0xFF, 0x01);
     uint8_t pidh = ov2640_reg_read(config, 0x0A);
     uint8_t pidl = ov2640_reg_read(config, 0x0B);
@@ -188,3 +225,149 @@ uint16_t ov2640_read_id(struct ov2640_config *config) {
     return pid;
 }
 
+void ov2640_set_color_format(ov2640_config_t *config, color_format_t color_format) {
+    config->color_format = color_format;
+    switch(color_format) {
+        case COLOR_FORMAT_RGB565:
+            ov2640_regs_write(config, ov2640_settings_rgb565);
+            break;
+        case COLOR_FORMAT_JPEG:
+            ov2640_regs_write(config, ov2640_settings_jpeg);
+            break;
+        default: break; //TODO: return false/-1
+    }
+    sleep_ms(15);
+}
+
+void ov2640_set_framesize(ov2640_config_t *config, framesize_t framesize) {
+    int ret = 0;
+    const uint8_t (*regs)[2];
+    uint16_t w = resolution[framesize].width;
+    uint16_t h = resolution[framesize].height;
+    aspect_ratio_t ratio = resolution[framesize].aspect_ratio;
+    uint16_t max_x = ratio_table[ratio].max_x;
+    uint16_t max_y = ratio_table[ratio].max_y;
+    uint16_t offset_x = ratio_table[ratio].offset_x;
+    uint16_t offset_y = ratio_table[ratio].offset_y;
+    ov2640_sensor_mode_t mode = OV2640_MODE_UXGA;
+    uint8_t clkrc, pclk_div;
+
+    //the ordering here is achieved with the correct order of definitions in the enum
+    if (framesize <= FRAMESIZE_CIF) {
+        mode = OV2640_MODE_CIF;
+        //for CIF shrink the active sensor area by a factor of 4
+        max_x /= 4;
+        max_y /= 4;
+        offset_x /= 4;
+        offset_y /= 4;
+        if(max_y > 296){
+            max_y = 296;
+        }
+    } else if (framesize <= FRAMESIZE_SVGA) {
+        mode = OV2640_MODE_SVGA;
+        //for SVGA shrink the active sensor area by a factor of 2
+        max_x /= 2;
+        max_y /= 2;
+        offset_x /= 2;
+        offset_y /= 2;
+    }
+
+    //now adjust the sensor registers to materialize the new framesize
+#define VAL_SET(x, mask, rshift, lshift) ((((x) >> (rshift)) & mask) << (lshift))
+
+    uint8_t ov2640_size_regs[][2] = {
+        { BANK_SEL, BANK_SEL_DSP },
+        { RESET, RESET_DVP },
+        // { SIZEL, (((max_x >> 11) & 0b1) << 6) | ((max_x & 0b111) << 3) | (max_y & 0b111) },
+        // { HSIZE8, max_x >> 3 }, //HSIZE8 = hsize/8
+        // { VSIZE8, max_y >> 3 }, //VSIZE8 = vsize/8
+        { HSIZE, (max_x >> 2) & 0xFF }, //HSIZE = hsize/4
+        { VSIZE, (max_y >> 2) & 0xFF }, //VSIZE = vsize/4
+        { XOFFL, offset_x & 0xFF },
+        { YOFFL, offset_y & 0xFF },
+        { VHYX, VAL_SET(max_y, 0b1, 8+2, 7) |       //V_SIZE[8]
+                VAL_SET(offset_y, 0b111, 8, 4) |     //OFFSET_Y[10:8]
+                VAL_SET(max_x, 0b1, 8+2, 3) |       //H_SIZE[8]
+                VAL_SET(offset_x, 0b111, 8, 0) },    //OFFSET_X[10:8]
+        { TEST, (max_x >> (9+2)) << 7},
+        { ZMOW, (w >> 2) & 0xFF },
+        { ZMOH, (h >> 2) & 0xFF },
+        { ZMHH, (((h >> 10) & 0b1) << 2) | ((w >> 10) & 0b11)},
+        ENDMARKER,
+    };
+
+    if(config->color_format == COLOR_FORMAT_JPEG) {
+        clkrc = 0x00;
+        pclk_div = 8;
+        if(mode == OV2640_MODE_UXGA){
+            pclk_div = 12;
+        }
+    } else {
+
+        pclk_div = R_DVP_SP_AUTO_MODE;
+        // pclk_div |= 8;
+
+        clkrc = CLKRC_DIV(8);
+
+        if (mode == OV2640_MODE_CIF) {
+            clkrc = CLKRC_DIV(4);
+        } else if(mode == OV2640_MODE_UXGA) {
+            pclk_div = 12;
+        }
+    }
+
+    if (mode == OV2640_MODE_CIF) {
+        regs = ov2640_settings_to_cif;
+    } else if (mode == OV2640_MODE_SVGA) {
+        regs = ov2640_settings_to_svga;
+    } else {
+        regs = ov2640_settings_to_uxga;
+    }
+
+    printf("CLKRC: %0x R_DVP_SP: %0x\n", clkrc, pclk_div);
+
+    //disable DSP while changing settings
+    ov2640_reg_write(config, BANK_SEL, BANK_SEL_DSP);
+    ov2640_reg_write(config, R_BYPASS, R_BYPASS_DSP_BYPAS);
+
+    ov2640_regs_write(config, regs);
+    ov2640_regs_write(config, ov2640_size_regs);
+
+    ov2640_reg_write(config, BANK_SEL, BANK_SEL_SENSOR);
+    ov2640_reg_write(config, CLKRC, clkrc);
+
+    ov2640_reg_write(config, BANK_SEL, BANK_SEL_DSP);
+    ov2640_reg_write(config, R_DVP_SP, pclk_div);
+    ov2640_reg_write(config, R_BYPASS, R_BYPASS_DSP_EN);
+
+    sleep_ms(100);
+
+    //set pixel format registers again (since DSP was resetted)
+    ov2640_set_color_format(config, config->color_format);
+
+    switch(config->color_format){
+        case COLOR_FORMAT_RGB565: config->frame_size_bytes = 2*h*w; break;
+        case COLOR_FORMAT_JPEG: config->frame_size_bytes = config->image_buf_size; break; //h*w / 5 see adafruit driver, probably accurate approximation
+        default: config->frame_prog_offs = 0; break;
+    }
+
+    if(config->frame_size_bytes > config->image_buf_size) {
+        //TODO: error!!!!!
+    }
+
+    uint sm = config->frame_sized_sm;
+    pio_sm_set_enabled(config->pio, sm, false);
+    pio_sm_clear_fifos(config->pio, sm);
+
+    pio_sm_restart(config->pio, sm);
+    pio_sm_exec(config->pio, sm, pio_encode_jmp(config->frame_sized_prog_offs));
+
+    pio_sm_set_enabled(config->pio, sm, true);
+}
+
+void ov2640_enable_test_pattern(ov2640_config_t *config) {
+    ov2640_reg_write(config, BANK_SEL, BANK_SEL_SENSOR);
+    uint8_t com7 = ov2640_reg_read(config, COM7);
+    com7 |= COM7_COLOR_BAR; //enable test pattern
+    ov2640_reg_write(config, COM7, com7);
+}

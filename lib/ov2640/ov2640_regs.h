@@ -203,9 +203,9 @@
 
 #define CLKRC_DIV(x)        (((x) - 1)&0x1F)
 #define CLKRC_2X            0x80
-#define CLKRC_2X_UXGA       (0x01 | CLKRC_2X)
-#define CLKRC_2X_SVGA       CLKRC_2X
-#define CLKRC_2X_CIF        CLKRC_2X
+#define CLKRC_2X_UXGA       (CLKRC_2X | CLKRC_DIV(12))
+#define CLKRC_2X_SVGA       (CLKRC_2X | CLKRC_DIV(8))
+#define CLKRC_2X_CIF        (CLKRC_2X | CLKRC_DIV(0))
 
 #define ENDMARKER {0xff, 0xff}
 
