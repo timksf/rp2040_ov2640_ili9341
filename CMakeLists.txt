@@ -19,9 +19,9 @@ add_executable(firmware main.c)
 pico_enable_stdio_uart(firmware 0)
 pico_enable_stdio_usb(firmware 1)
 
-add_executable(display_test display_main.c)
-pico_enable_stdio_uart(display_test 1)
-pico_enable_stdio_usb(display_test 0)
+add_executable(display_test display_main.c rotary_encoder.c) #esa_logo.c
+# pico_enable_stdio_uart(display_test 1)
+pico_enable_stdio_usb(display_test 1)
 
 add_executable(framecapture framecapture.c)
 pico_enable_stdio_uart(framecapture 0)
@@ -29,8 +29,10 @@ pico_enable_stdio_usb(framecapture 1)
 
 add_executable(blinky blink.c)
 
+# Add libraries
 add_subdirectory(lib/ili9341)
 add_subdirectory(lib/ov2640)
+add_subdirectory(lib/lvgl)
 
 # Add the standard library to the build
 target_link_libraries(firmware 
@@ -44,9 +46,10 @@ target_link_libraries(framecapture
     ov2640
 )
 
-target_link_libraries(display_test 
+target_link_libraries(display_test
     pico_stdlib
     ili9341
+    # lvgl
 )
 
 target_link_libraries(blinky 

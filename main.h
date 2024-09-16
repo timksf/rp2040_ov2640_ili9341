@@ -44,6 +44,13 @@ const int PIN_CAM_RESETB = 3;
 const int PIN_CAM_XCLK = 25;
 const int PIN_CAM_VSYNC = 16;
 const int PIN_CAM_Y2_PIO_BASE = 6;
+//user GPIO
+const uint PIN_USR_BTN0 = 0;
+const uint PIN_USR_BTN1 = 1;
+const uint PIN_ENC_BTN = 27;
+const uint PIN_ENC_A = 28;
+const uint PIN_ENC_B = 29;
+const 
 #endif //CUSTOM_BOARD
 
 const uint8_t CMD_REG_WRITE = 0xAA;

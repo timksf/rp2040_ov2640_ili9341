@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <tusb.h>
 #include <unistd.h>
+#include <inttypes.h>
 #include "pico/stdlib.h"
 #include "ov2640.h"
 #include "ov2640_regs.h"
@@ -35,14 +36,14 @@ int main() {
     uart_set_format(UART_INST, 8, 1, UART_PARITY_NONE);
     uart_puts(UART_INST, "Hello from UART");
 #else 
-    //turn-off auto translation of data bytes
-    stdio_set_translate_crlf(&stdio_usb, false);
+    //turn-off/on auto translation of data bytes
+    stdio_set_translate_crlf(&stdio_usb, true);
 #endif //CUSTOM_BOARD
 
     for(int i = 0; i < ILI9341_TFTWIDTH*ILI9341_TFTHEIGHT; i++) 
         ((uint16_t*)frame_buf)[i] = ILI9341_MAGENTA;
     
-    struct ili9341_config lcd_config;
+    ili9341_config_t lcd_config;
     ov2640_config_t cam_config;
 
     lcd_config.spi = LCD_SPI_INST;
@@ -51,6 +52,9 @@ int main() {
     lcd_config.pin_cs = PIN_LCD_CS;
     lcd_config.pin_sck = PIN_LCD_SCK;
     lcd_config.pin_tx = PIN_LCD_TX;
+    lcd_config.dma_data_chan = dma_claim_unused_channel(true);
+    lcd_config.dma_ctrl_chan = dma_claim_unused_channel(true);
+    lcd_config.frame_buf = (uint16_t*) &frame_buf[0];
 
     cam_config.sccb = CAM_I2C_INST;
     cam_config.pin_sioc = PIN_CAM_SIOC;
@@ -62,7 +66,8 @@ int main() {
     cam_config.pio = CAM_PIO_INST;
     cam_config.frame_sm = CAM_FRAME_SM;
     cam_config.frame_sized_sm = CAM_FRAME_SIZED_SM;
-    cam_config.dma_channel = dma_claim_unused_channel(true);
+    cam_config.dma_data_chan = dma_claim_unused_channel(true);
+    cam_config.dma_ctrl_chan = dma_claim_unused_channel(true);
     cam_config.image_buf = (uint8_t*)&frame_buf[0];
     cam_config.image_buf_size = sizeof(frame_buf);
     cam_config.frame_size_bytes = 0; //this will be used for transfers and is set by ov2640_set_framesize
@@ -71,11 +76,6 @@ int main() {
     ili9341_init(&lcd_config);
     ili9341_set_rotation(&lcd_config,1); //"landscape mode"
     ili9341_write_frame(&lcd_config, 0, 0, ILI9341_TFTHEIGHT, ILI9341_TFTWIDTH, (uint16_t*)frame_buf);
-
-    // for(int i = 0; i < ILI9341_TFTWIDTH*ILI9341_TFTHEIGHT; i++) 
-    //     frame_buf[i] = ILI9341_MAGENTA;
-    
-    // ili9341_write_frame(&lcd_config, 0, 0, ILI9341_TFTHEIGHT, ILI9341_TFTWIDTH, frame_buf);
 
     // after setup wait for serial terminal connection on USB port
     while (!tud_cdc_connected()) { 
@@ -96,6 +96,27 @@ int main() {
 
     //frame streaming up to 320x240
     ov2640_set_framesize(&cam_config, FRAMESIZE_QVGA);
+
+    uint32_t time, last_time;
+    last_time = to_ms_since_boot(get_absolute_time());
+
+    // ov2640_frame_capture_continuous(&cam_config, false);
+
+    while(1) {
+        ov2640_frame_capture_single(&cam_config, true);
+        ili9341_write_frame(&lcd_config, 0, 0, ILI9341_TFTHEIGHT, ILI9341_TFTWIDTH, (uint16_t*)frame_buf);
+        time = to_ms_since_boot(get_absolute_time());
+        uint32_t frame_time = time - last_time;
+        last_time = time;
+        printf("Main loop time: %" PRIuFAST32 " ms\n", frame_time);
+        tight_loop_contents();
+    }
+}
+
+bool timer_callback(__unused struct repeating_timer *t) {
+    gpio_put(PIN_LED, !gpio_get(PIN_LED));
+    return true;
+}
 
     /*
         We use several DMA channels with a specific chained configuration:
@@ -165,46 +186,3 @@ int main() {
     //     2,
     //     false
     // );
-
-    while(1) {
-        tud_task();
-        uint8_t cmd = 0x0;
-#ifndef CUSTOM_BOARD
-        uart_read_blocking(UART_INST, &cmd, 1);
-        uart_write_blocking(UART_INST, &cmd, 1);
-#else   
-        if(tud_cdc_available()) {
-            cmd = tud_cdc_read_char();
-        }
-#endif //CUSTOM_BOARD
-
-        if (cmd == CMD_CAPTURE) {
-            // ov2640_set_color_format(&cam_config, COLOR_FORMAT_RGB565);
-            // ov2640_set_framesize(&cam_config, FRAMESIZE_QVGA);
-            ov2640_frame_capture_single(&cam_config, true);
-#ifndef CUSTOM_BOARD
-            uart_write_blocking(UART_INST, cam_config.image_buf, cam_config.frame_size_bytes);
-#else 
-            write(1, cam_config.image_buf, cam_config.frame_size_bytes);
-#endif //CUSTOM_BOARD
-        } else if(cmd == CMD_CAPTURE_JPEG) {
-            ov2640_set_color_format(&cam_config, COLOR_FORMAT_JPEG);
-            ov2640_set_framesize(&cam_config, FRAMESIZE_UXGA);
-            ov2640_frame_capture_single(&cam_config, true);
-            //for JPEG, either search for EOI or simply transmit entire buffer and let recipient search
-#ifndef CUSTOM_BOARD
-            uart_write_blocking(UART_INST, cam_config.image_buf, cam_config.image_buf_size);
-#else 
-            write(1, cam_config.image_buf, cam_config.image_buf_size);
-#endif //CUSTOM_BOARD
-        }
-
-        // ili9341_write_frame(&lcd_config, 0, 0, ILI9341_TFTHEIGHT, ILI9341_TFTWIDTH, frame_buf);
-        // tight_loop_contents();
-    }
-}
-
-bool timer_callback(__unused struct repeating_timer *t) {
-    gpio_put(PIN_LED, !gpio_get(PIN_LED));
-    return true;
-}

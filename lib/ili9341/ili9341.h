@@ -85,7 +85,7 @@
 #define ILI9341_YELLOW 0xFFE0
 #define ILI9341_ORANGE 0xFC00
 
-struct ili9341_config {
+typedef struct {
     spi_inst_t *spi;
     int pin_rst;
     uint pin_dc;
@@ -96,26 +96,31 @@ struct ili9341_config {
     uint pin_rx;
 
     //the following attributes are set by the init function
-    uint dma_chan;
-    dma_channel_config dma_cfg;
+    uint dma_data_chan;
+    uint dma_ctrl_chan;
 
     uint width;
     uint height;
-};
 
-void ili9341_init(struct ili9341_config *cfg);
+    uint16_t *frame_buf;
+} ili9341_config_t;
 
-void ili9341_set_rotation(struct ili9341_config *cfg, uint8_t m);
+void ili9341_init(ili9341_config_t *cfg);
 
-void ili9341_write_pix(struct ili9341_config *cfg, int x, int y, uint16_t col);
-void ili9341_write_frame(struct ili9341_config *cfg, uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint16_t *frame);
+void ili9341_set_rotation(ili9341_config_t *cfg, uint8_t m);
 
-void ili9341_reset(struct ili9341_config *cfg);
-void ili9341_wait_for_dma(struct ili9341_config *cfg);
+void ili9341_write_pix(ili9341_config_t *cfg, int x, int y, uint16_t col);
+void ili9341_write_frame(ili9341_config_t *cfg, uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint16_t *frame);
 
-void ili9341_select(struct ili9341_config *cfg);
-void ili9341_write_command(struct ili9341_config *cfg, uint8_t cmd);
-void ili9341_send_command(struct ili9341_config *cfg, uint8_t cmd, const uint8_t *args, uint8_t arg_size);
-void ili9341_write_data(struct ili9341_config *cfg, const uint8_t *d, size_t size);
+void ili9341_reset(ili9341_config_t *cfg);
+void ili9341_wait_for_dma(ili9341_config_t *cfg);
+
+void ili9341_select(ili9341_config_t *cfg);
+void ili9341_write_command(ili9341_config_t *cfg, uint8_t cmd);
+void ili9341_send_command(ili9341_config_t *cfg, uint8_t cmd, const uint8_t *args, uint8_t arg_size);
+void ili9341_write_data(ili9341_config_t *cfg, const uint8_t *d, size_t size);
+
+void ili9341_stream_start(ili9341_config_t *cfg, uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint16_t *frame);
+void ili9341_stream_stop(ili9341_config_t *cfg);
 
 #endif

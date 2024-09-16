@@ -43,7 +43,7 @@ int main() {
     cam_config.pio = CAM_PIO_INST;
     cam_config.frame_sm = CAM_FRAME_SM;
     cam_config.frame_sized_sm = CAM_FRAME_SIZED_SM;
-    cam_config.dma_channel = dma_claim_unused_channel(true);
+    cam_config.dma_data_chan = dma_claim_unused_channel(true);
     cam_config.image_buf = (uint8_t*)&frame_buf[0];
     cam_config.image_buf_size = sizeof(frame_buf);
     cam_config.frame_size_bytes = 0; //this will be used for transfers and is set by ov2640_set_framesize
@@ -86,7 +86,7 @@ int main() {
         if (cmd == CMD_CAPTURE) {
             // ov2640_set_color_format(&cam_config, COLOR_FORMAT_RGB565);
             // ov2640_set_framesize(&cam_config, FRAMESIZE_QVGA);
-            // sleep_ms(100);
+            // ov2640_frame_capture_single(&cam_config, true);
             ov2640_frame_capture_single(&cam_config, true);
 #ifndef CUSTOM_BOARD
             uart_write_blocking(UART_INST, cam_config.image_buf, cam_config.frame_size_bytes);

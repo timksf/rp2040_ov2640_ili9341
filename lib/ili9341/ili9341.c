@@ -35,8 +35,8 @@ const uint8_t initcmd[] = {
     0x00				  // End of list
 };
 
-void ili9341_init(struct ili9341_config *cfg) {
-    spi_init(cfg->spi, 1000 * 40000); //40Mbps
+void ili9341_init(ili9341_config_t *cfg) {
+    spi_init(cfg->spi, 1000 * 50000); //40Mbps
     spi_set_format(cfg->spi, 16, SPI_CPOL_1, SPI_CPOL_1, SPI_MSB_FIRST);
 
     gpio_set_function(cfg->pin_sck, GPIO_FUNC_SPI);
@@ -55,20 +55,6 @@ void ili9341_init(struct ili9341_config *cfg) {
         gpio_set_dir(cfg->pin_rst, GPIO_OUT);
         gpio_put(cfg->pin_rst, 1);
     }
-
-    //configure DMA (we only want to output data via SPI)
-    cfg->dma_chan = dma_claim_unused_channel(true);
-    cfg->dma_cfg = dma_channel_get_default_config(cfg->dma_chan);
-    channel_config_set_transfer_data_size(&cfg->dma_cfg, DMA_SIZE_16);
-    channel_config_set_dreq(&cfg->dma_cfg, spi_get_dreq(cfg->spi, true));
-
-    dma_channel_configure(
-        cfg->dma_chan, &cfg->dma_cfg,
-        &spi_get_hw(cfg->spi)->dr,  //write address
-        NULL,					    //read address still unknown
-        0,						    //element count still unknown
-        false                       //don't start yet
-    );
 
     //init display over SPI
     ili9341_select(cfg);
@@ -97,7 +83,7 @@ void ili9341_init(struct ili9341_config *cfg) {
     cfg->height = ILI9341_TFTHEIGHT;
 }
 
-void ili9341_reset(struct ili9341_config *cfg) {
+void ili9341_reset(ili9341_config_t *cfg) {
     if (cfg->pin_rst != -1) {
         gpio_put(cfg->pin_rst, 0);
         sleep_ms(5);
@@ -106,42 +92,42 @@ void ili9341_reset(struct ili9341_config *cfg) {
     }
 }
 
-void ili9341_select(struct ili9341_config *cfg) {
+void ili9341_select(ili9341_config_t *cfg) {
     gpio_put(cfg->pin_cs, 0);
 }
 
-void ili9341_deselect(struct ili9341_config *cfg) {
+void ili9341_deselect(ili9341_config_t *cfg) {
     gpio_put(cfg->pin_cs, 1);
 }
 
-void ili9341_announce_command(struct ili9341_config *cfg) {
+void ili9341_announce_command(ili9341_config_t *cfg) {
     gpio_put(cfg->pin_dc, 0);
 }
 
-void ili9341_announce_data(struct ili9341_config *cfg) {
+void ili9341_announce_data(ili9341_config_t *cfg) {
     gpio_put(cfg->pin_dc, 1);
 }
 
-void ili9341_write_command(struct ili9341_config *cfg, uint8_t cmd) {
+void ili9341_write_command(ili9341_config_t *cfg, uint8_t cmd) {
     ili9341_announce_command(cfg);
     spi_set_format(cfg->spi, 8, SPI_CPOL_1, SPI_CPOL_1, SPI_MSB_FIRST);
     spi_write_blocking(cfg->spi, &cmd, sizeof(cmd));
 }
 
-void ili9341_write_data(struct ili9341_config *cfg, const uint8_t *d, size_t size) {
+void ili9341_write_data(ili9341_config_t *cfg, const uint8_t *d, size_t size) {
     ili9341_announce_data(cfg);
     spi_set_format(cfg->spi, 8, SPI_CPOL_1, SPI_CPOL_1, SPI_MSB_FIRST);
     spi_write_blocking(cfg->spi, d, size);
 }
 
-void ili9341_send_command(struct ili9341_config *cfg, uint8_t cmd, const uint8_t *args, uint8_t arg_size) {
+void ili9341_send_command(ili9341_config_t *cfg, uint8_t cmd, const uint8_t *args, uint8_t arg_size) {
     ili9341_select(cfg);
     ili9341_write_command(cfg, cmd);
     ili9341_write_data(cfg, args, arg_size);
     ili9341_deselect(cfg);
 }
 
-void ili9341_set_rotation(struct ili9341_config *cfg, uint8_t m) {
+void ili9341_set_rotation(ili9341_config_t *cfg, uint8_t m) {
     uint8_t rotation = m % 4; // can't be higher than 3
     switch (rotation) {
     case 0:
@@ -168,7 +154,7 @@ void ili9341_set_rotation(struct ili9341_config *cfg, uint8_t m) {
     ili9341_send_command(cfg, ILI9341_MADCTL, &m, 1);
 }
 
-void ili9341_set_addr_window(struct ili9341_config *cfg, uint16_t x, uint16_t y, uint16_t w, uint16_t h) {
+void ili9341_set_addr_window(ili9341_config_t *cfg, uint16_t x, uint16_t y, uint16_t w, uint16_t h) {
     uint32_t xa = ((uint32_t)x << 16) | (x + w - 1);
     uint32_t ya = ((uint32_t)y << 16) | (y + h - 1);
 
@@ -186,27 +172,69 @@ void ili9341_set_addr_window(struct ili9341_config *cfg, uint16_t x, uint16_t y,
     ili9341_write_command(cfg, ILI9341_RAMWR);
 }
 
-void ili9341_write_frame(struct ili9341_config *cfg, uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint16_t *frame) {
+void ili9341_write_frame(ili9341_config_t *cfg, uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint16_t *frame) {
     ili9341_select(cfg);
     ili9341_set_addr_window(cfg, x, y, w, h); // Clipped area
     ili9341_announce_data(cfg);
     spi_set_format(cfg->spi, 16, SPI_CPOL_1, SPI_CPOL_1, SPI_MSB_FIRST);
+
+    dma_channel_config c = dma_channel_get_default_config(cfg->dma_data_chan);
+    channel_config_set_transfer_data_size(&c, DMA_SIZE_16);
+    channel_config_set_dreq(&c, spi_get_dreq(cfg->spi, true));
     dma_channel_configure(
-        cfg->dma_chan, &cfg->dma_cfg,
-        &spi_get_hw(cfg->spi)->dr, //WRITE_ADDR
-        frame, //READ_ADDR
-        w * h, //TRANS_COUNT
-        true //start
+        cfg->dma_data_chan, &c,
+        &spi_get_hw(cfg->spi)->dr,
+        frame,
+        w * h,
+        true
     );
-    dma_channel_wait_for_finish_blocking(cfg->dma_chan);
+    dma_channel_wait_for_finish_blocking(cfg->dma_data_chan);
     ili9341_deselect(cfg);
 }
 
-void ili9341_write_pix(struct ili9341_config *cfg, int x, int y, uint16_t col) {
+void ili9341_write_pix(ili9341_config_t *cfg, int x, int y, uint16_t col) {
     ili9341_select(cfg);
     ili9341_set_addr_window(cfg, x, y, 1, 1); // Clipped area
     ili9341_announce_data(cfg);
     spi_set_format(cfg->spi, 16, SPI_CPOL_1, SPI_CPOL_1, SPI_MSB_FIRST);
     spi_write16_blocking(cfg->spi, &col, 1);
+    ili9341_deselect(cfg);
+}
+
+
+void ili9341_stream_start(ili9341_config_t *cfg, uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint16_t *frame) {
+    ili9341_select(cfg);
+    ili9341_set_addr_window(cfg, x, y, w, h); // Clipped area
+    ili9341_announce_data(cfg);
+    spi_set_format(cfg->spi, 16, SPI_CPOL_1, SPI_CPOL_1, SPI_MSB_FIRST);
+
+    //first, construct the control DMA, which reset the READ address 
+    dma_channel_config c = dma_channel_get_default_config(cfg->dma_ctrl_chan);
+    channel_config_set_transfer_data_size(&c, DMA_SIZE_32);
+    channel_config_set_read_increment(&c, false);
+    channel_config_set_write_increment(&c, false);
+    dma_channel_configure(
+        cfg->dma_ctrl_chan, &c, 
+        &dma_hw->ch[cfg->dma_data_chan].al3_read_addr_trig, //reset the read address after each completed DMA transfer
+        &cfg->frame_buf, //the read_addr of the data channel is reset to the beginning of the frame buffer
+        1, //write a single address, so a single word
+        false
+    );
+
+    dma_channel_config c1 = dma_channel_get_default_config(cfg->dma_data_chan);
+    channel_config_set_transfer_data_size(&c1, DMA_SIZE_16);
+    channel_config_set_dreq(&c1, spi_get_dreq(cfg->spi, true));
+    dma_channel_configure(
+        cfg->dma_data_chan, &c1,
+        &spi_get_hw(cfg->spi)->dr,
+        frame,
+        w * h,
+        false
+    );
+
+    //the DMA ctrl channel will be started externally
+}
+
+void ili9341_stream_stop(ili9341_config_t *cfg) {
     ili9341_deselect(cfg);
 }

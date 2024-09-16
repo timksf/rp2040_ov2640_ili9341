@@ -38,7 +38,8 @@ typedef struct {
 
     bool pending_capture;
 
-    uint dma_channel;
+    uint dma_data_chan;
+    uint dma_ctrl_chan;
     uint8_t *image_buf;
     size_t image_buf_size;
     size_t frame_size_bytes;
@@ -64,7 +65,7 @@ static const ov2640_ratio_settings_t ratio_table[] = {
 void ov2640_init(ov2640_config_t *config);
 
 void ov2640_frame_capture_single(ov2640_config_t *config, bool blocking);
-void ov2640_frame_capture_continuous(ov2640_config_t *config);
+void ov2640_frame_capture_continuous(ov2640_config_t *config, uint chain_to);
 
 void ov2640_sreset(ov2640_config_t *config);
 

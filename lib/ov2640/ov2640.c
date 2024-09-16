@@ -85,8 +85,8 @@ void ov2640_init(ov2640_config_t *config) {
 
     ///-------------TESTING-------------
     irq_context = config;    
-    // irq_set_enabled(PIO0_IRQ_1, true);
-    // irq_set_exclusive_handler(PIO0_IRQ_1, frame_sync_isr);
+    irq_set_enabled(PIO0_IRQ_1, true);
+    irq_set_exclusive_handler(PIO0_IRQ_1, frame_sync_isr);
     uint offs = pio_add_program(config->pio, &frame_sync_program);
     frame_sync_init(config->pio, 2, offs, config->pin_y2_pio_base);
     // pio_sm_set_jmp_pin(config->pio, 2, config->pin_y2_pio_base + OFFS_VSYNC);
@@ -95,23 +95,23 @@ void ov2640_init(ov2640_config_t *config) {
 void ov2640_frame_capture_single(ov2640_config_t *config, bool blocking) {
     uint sm = config->frame_sized_sm;
 
-    dma_channel_config c = dma_channel_get_default_config(config->dma_channel);
+    dma_channel_config c = dma_channel_get_default_config(config->dma_data_chan);
     channel_config_set_read_increment(&c, false);
     channel_config_set_write_increment(&c, true);
     channel_config_set_dreq(&c, pio_get_dreq(config->pio, sm, false));
     channel_config_set_transfer_data_size(&c, DMA_SIZE_8);
 
     dma_channel_configure(
-        config->dma_channel, &c,
+        config->dma_data_chan, &c,
         config->image_buf,
         &config->pio->rxf[sm],
         config->frame_size_bytes,
         false
     );
 
-    dma_channel_start(config->dma_channel);
+    dma_channel_start(config->dma_data_chan);
     trigger_frame_capture(config->pio, sm, config->frame_size_bytes-1);
-    dma_channel_wait_for_finish_blocking(config->dma_channel);
+    dma_channel_wait_for_finish_blocking(config->dma_data_chan);
 
     // pio_sm_set_enabled(config->pio, sm, false);
     // pio_sm_clear_fifos(config->pio, sm);
@@ -123,7 +123,7 @@ void ov2640_frame_capture_single(ov2640_config_t *config, bool blocking) {
     // dma_channel_wait_for_finish_blocking(config->dma_channel);
 }
 
-void ov2640_frame_capture_continuous(ov2640_config_t *config) {
+void ov2640_frame_capture_continuous(ov2640_config_t *config, uint chain_to) {
     //This function sets up two DMA channels
     //One DMA channel is responsible for moving the data from the PIO
     //image capture SM to main memory
@@ -132,50 +132,49 @@ void ov2640_frame_capture_continuous(ov2640_config_t *config) {
     //this channel triggers its "finish" interrupt
 
     //first, construct the control DMA 
-    uint ctrl_channel = dma_claim_unused_channel(true);
-    dma_channel_config c = dma_channel_get_default_config(ctrl_channel);
+    dma_channel_config c = dma_channel_get_default_config(config->dma_ctrl_chan);
     channel_config_set_transfer_data_size(&c, DMA_SIZE_32);
     channel_config_set_read_increment(&c, false);
     channel_config_set_write_increment(&c, false);
-    channel_config_set_chain_to(&c, config->dma_channel);
     dma_channel_configure(
-        ctrl_channel, &c, 
-        &dma_hw->ch[config->dma_channel].write_addr, //reset the write address after each completed DMA transfer
-        &config->image_buf, //the write_addr is reset to the beginning of the frame buffer
+        config->dma_ctrl_chan, &c, 
+        &dma_hw->ch[config->dma_data_chan].al2_write_addr_trig, //reset the write address after each completed DMA transfer
+        &config->image_buf, //the write_addr of the data channel is reset to the beginning of the frame buffer
         1, //write a single address, so a single word
         false
     );
 
+    //chaining from ctrl to data channel is not needed as we use a *triggering* write 
+
     //now, construct the data DMA, same as for capturing single frames
-    dma_channel_config c1 = dma_channel_get_default_config(config->dma_channel);
+    dma_channel_config c1 = dma_channel_get_default_config(config->dma_data_chan);
     channel_config_set_read_increment(&c1, false);
     channel_config_set_write_increment(&c1, true);
     channel_config_set_dreq(&c1, pio_get_dreq(config->pio, config->frame_sm, false));
     channel_config_set_transfer_data_size(&c1, DMA_SIZE_8);
-    channel_config_set_chain_to(&c1, ctrl_channel);
+    
+    //optionally chain to a different channel
+    if(chain_to >= NUM_DMA_CHANNELS || !dma_channel_is_claimed(chain_to))
+        channel_config_set_chain_to(&c1, config->dma_ctrl_chan);
+    else
+        channel_config_set_chain_to(&c1, chain_to);
+
     dma_channel_configure(
-        config->dma_channel, &c1,
+        config->dma_data_chan, &c1,
         config->image_buf,
         &config->pio->rxf[config->frame_sm],
         config->frame_size_bytes,
         false
     );
 
+
     //raise DMA_IRQ_0 when data channel finishes
-    dma_channel_set_irq0_enabled(ctrl_channel, true);
-    irq_set_enabled(DMA_IRQ_0, true);
-    irq_set_exclusive_handler(DMA_IRQ_0, frame_sync_isr);
-
-    //perform proper reset of frame capture SM 
-    pio_sm_set_enabled(config->pio, config->frame_sm, false);
-    pio_sm_clear_fifos(config->pio, config->frame_sm);
-
-    pio_sm_restart(config->pio, config->frame_sm);
-    pio_sm_exec(config->pio, config->frame_sm, pio_encode_jmp(config->frame_prog_offs));
-    pio_sm_set_enabled(config->pio, config->frame_sm, true);
+    // dma_channel_set_irq0_enabled(config->dma_ctrl_chan, true);
+    // irq_set_enabled(DMA_IRQ_0, true);
+    // irq_set_exclusive_handler(DMA_IRQ_0, frame_sync_isr);
 
     //start control channel!
-    dma_channel_start(ctrl_channel);
+    dma_channel_start(config->dma_ctrl_chan);
 }
 
 void ov2640_reg_write(ov2640_config_t *config, uint8_t reg, uint8_t value) {
@@ -307,10 +306,10 @@ void ov2640_set_framesize(ov2640_config_t *config, framesize_t framesize) {
         pclk_div = R_DVP_SP_AUTO_MODE;
         // pclk_div |= 8;
 
-        clkrc = CLKRC_DIV(8);
+        clkrc = CLKRC_2X | CLKRC_DIV(8);
 
         if (mode == OV2640_MODE_CIF) {
-            clkrc = CLKRC_DIV(4);
+            clkrc = CLKRC_2X | CLKRC_DIV(2);
         } else if(mode == OV2640_MODE_UXGA) {
             pclk_div = 12;
         }
