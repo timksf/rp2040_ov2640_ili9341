@@ -27,12 +27,20 @@ add_executable(framecapture framecapture.c)
 pico_enable_stdio_uart(framecapture 0)
 pico_enable_stdio_usb(framecapture 1)
 
+add_executable(test_sdcard 
+    test_sdcard.c
+    sd_config.c
+)
+pico_enable_stdio_uart(test_sdcard 0)
+pico_enable_stdio_usb(test_sdcard 1)
+
 add_executable(blinky blink.c)
 
 # Add libraries
 add_subdirectory(lib/ili9341)
 add_subdirectory(lib/ov2640)
 add_subdirectory(lib/lvgl)
+add_subdirectory(lib/no-OS-FatFS-SD-SPI-RPi-Pico/FatFs_SPI build)
 
 # Add the standard library to the build
 target_link_libraries(firmware 
@@ -50,6 +58,11 @@ target_link_libraries(display_test
     pico_stdlib
     ili9341
     # lvgl
+)
+
+target_link_libraries(test_sdcard 
+    pico_stdlib
+    FatFs_SPI
 )
 
 target_link_libraries(blinky 

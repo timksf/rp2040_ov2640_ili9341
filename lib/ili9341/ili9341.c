@@ -37,7 +37,7 @@ const uint8_t initcmd[] = {
 
 void ili9341_init(ili9341_config_t *cfg) {
     spi_init(cfg->spi, 1000 * 50000); //40Mbps
-    spi_set_format(cfg->spi, 16, SPI_CPOL_1, SPI_CPOL_1, SPI_MSB_FIRST);
+    spi_set_format(cfg->spi, 16, SPI_CPOL_1, SPI_CPHA_1, SPI_MSB_FIRST);
 
     gpio_set_function(cfg->pin_sck, GPIO_FUNC_SPI);
     gpio_set_function(cfg->pin_tx, GPIO_FUNC_SPI);

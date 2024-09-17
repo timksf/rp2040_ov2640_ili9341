@@ -50,7 +50,6 @@ const uint PIN_USR_BTN1 = 1;
 const uint PIN_ENC_BTN = 27;
 const uint PIN_ENC_A = 28;
 const uint PIN_ENC_B = 29;
-const 
 #endif //CUSTOM_BOARD
 
 const uint8_t CMD_REG_WRITE = 0xAA;
