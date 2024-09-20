@@ -8,7 +8,7 @@
 #include "ili9341.h"
 #include "hardware/dma.h"
 
-#include "main.h"
+#include "board_config.h"
 
 uint8_t frame_buf[BUF_SIZE];
 //used for uart DMA transfer

@@ -84,11 +84,11 @@ void ov2640_init(ov2640_config_t *config) {
     image_frame_capture_sized_init(config->pio, config->frame_sized_sm, config->frame_sized_prog_offs, config->pin_y2_pio_base);
 
     ///-------------TESTING-------------
-    irq_context = config;    
-    irq_set_enabled(PIO0_IRQ_1, true);
-    irq_set_exclusive_handler(PIO0_IRQ_1, frame_sync_isr);
-    uint offs = pio_add_program(config->pio, &frame_sync_program);
-    frame_sync_init(config->pio, 2, offs, config->pin_y2_pio_base);
+    // irq_context = config;    
+    // irq_set_enabled(PIO0_IRQ_1, true);
+    // irq_set_exclusive_handler(PIO0_IRQ_1, frame_sync_isr);
+    // uint offs = pio_add_program(config->pio, &frame_sync_program);
+    // frame_sync_init(config->pio, 2, offs, config->pin_y2_pio_base);
     // pio_sm_set_jmp_pin(config->pio, 2, config->pin_y2_pio_base + OFFS_VSYNC);
 }
 

@@ -1,5 +1,5 @@
-#ifndef __MAIN_H__
-#define __MAIN_H__
+#ifndef __BOARD_CONFIG_H__
+#define __BOARD_CONFIG_H__
 
 #define UART_INST uart1
 #define CAM_PIO_INST pio0
@@ -57,4 +57,4 @@ const uint8_t CMD_REG_READ = 0xBB;
 const uint8_t CMD_CAPTURE = 0xCC;
 const uint8_t CMD_CAPTURE_JPEG = 0xDD;
 
-#endif //__MAIN_H__
+#endif //__BOARD_CONFIG_H__

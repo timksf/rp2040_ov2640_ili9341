@@ -6,7 +6,7 @@
 #include "sd_card.h"
 #include "ff.h"
 
-#include "main.h"
+#include "board_config.h"
 
 //forward declaration of callbacks  
 bool timer_callback(__unused struct repeating_timer *t);

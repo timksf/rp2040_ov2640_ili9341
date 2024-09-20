@@ -3,7 +3,7 @@
 #include "hardware/dma.h"
 // #include "lvgl.h"
 
-#include "main.h"
+#include "board_config.h"
 #include "ili9341.h"
 #include "rotary_encoder.h"
 

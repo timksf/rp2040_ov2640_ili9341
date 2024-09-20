@@ -34,6 +34,13 @@ add_executable(test_sdcard
 pico_enable_stdio_uart(test_sdcard 0)
 pico_enable_stdio_usb(test_sdcard 1)
 
+add_executable(jpeg_sd 
+    jpeg_capture_sd.c
+    sd_config.c
+)
+pico_enable_stdio_uart(jpeg_sd 0)
+pico_enable_stdio_usb(jpeg_sd 1)
+
 add_executable(blinky blink.c)
 
 # Add libraries
@@ -62,6 +69,12 @@ target_link_libraries(display_test
 
 target_link_libraries(test_sdcard 
     pico_stdlib
+    FatFs_SPI
+)
+
+target_link_libraries(jpeg_sd 
+    pico_stdlib
+    ov2640
     FatFs_SPI
 )
 

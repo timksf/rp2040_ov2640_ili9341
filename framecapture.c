@@ -6,7 +6,7 @@
 #include "ov2640_regs.h"
 #include "hardware/dma.h"
 
-#include "main.h"
+#include "board_config.h"
 
 uint8_t frame_buf[BUF_SIZE];
 
