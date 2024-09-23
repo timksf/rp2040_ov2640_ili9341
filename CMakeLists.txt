@@ -1,8 +1,18 @@
 # Generated Cmake Pico project file
 cmake_minimum_required(VERSION 3.22)
 
+function(add_size_report target)
+    add_custom_target(${target}_size ALL
+        DEPENDS ${target}.elf
+        COMMAND ${CMAKE_SIZE} ${target}.elf
+    )
+    add_dependencies(${target}_size ${target})
+endfunction()
+
 include(pico-sdk/pico_sdk_init.cmake)
 
+set(CMAKE_SIZE arm-none-eabi-size)
+set(PICO_DEOPTIMIZED_DEBUG 1)
 set(PICO_BOARD pico CACHE STRING "Board type")
 
 if (PICO_SDK_VERSION_STRING VERSION_LESS "1.4.0")
@@ -10,7 +20,7 @@ if (PICO_SDK_VERSION_STRING VERSION_LESS "1.4.0")
 endif()
 
 project(ov2640_ili9341)
-
+add_compile_options(-Wall -Wextra)
 # Initialise the Raspberry Pi Pico SDK
 pico_sdk_init()
 
@@ -36,10 +46,17 @@ pico_enable_stdio_usb(test_sdcard 1)
 
 add_executable(jpeg_sd 
     jpeg_capture_sd.c
-    sd_config.c
+    # sd_config.c
+    util.c
 )
 pico_enable_stdio_uart(jpeg_sd 0)
 pico_enable_stdio_usb(jpeg_sd 1)
+add_size_report(jpeg_sd)
+
+
+add_executable(error_rpe RPE_minimal.c)
+pico_enable_stdio_uart(error_rpe 0)
+pico_enable_stdio_usb(error_rpe 1)
 
 add_executable(blinky blink.c)
 
@@ -48,6 +65,7 @@ add_subdirectory(lib/ili9341)
 add_subdirectory(lib/ov2640)
 add_subdirectory(lib/lvgl)
 add_subdirectory(lib/no-OS-FatFS-SD-SPI-RPi-Pico/FatFs_SPI build)
+add_subdirectory(lib/tjpgd)
 
 # Add the standard library to the build
 target_link_libraries(firmware 
@@ -75,7 +93,16 @@ target_link_libraries(test_sdcard
 target_link_libraries(jpeg_sd 
     pico_stdlib
     ov2640
+    ili9341
     FatFs_SPI
+    tjpgd
+)
+
+target_link_libraries(error_rpe 
+    pico_stdlib
+    ili9341
+    FatFs_SPI
+    tjpgd
 )
 
 target_link_libraries(blinky 
@@ -92,4 +119,5 @@ pico_add_extra_outputs(firmware)
 pico_add_extra_outputs(framecapture)
 pico_add_extra_outputs(display_test)
 pico_add_extra_outputs(blinky)
-
+pico_add_extra_outputs(jpeg_sd)
+pico_add_extra_outputs(error_rpe)

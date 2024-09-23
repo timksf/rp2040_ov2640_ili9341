@@ -370,3 +370,24 @@ void ov2640_enable_test_pattern(ov2640_config_t *config) {
     com7 |= COM7_COLOR_BAR; //enable test pattern
     ov2640_reg_write(config, COM7, com7);
 }
+
+void ov2640_set_brightness(ov2640_config_t *config, int8_t level) {
+    ov2640_reg_write(config, BANK_SEL, BANK_SEL_DSP);
+
+    level += 3;
+    if (level <= 0 || level > NUM_BRIGHTNESS_LEVELS) {
+        return;
+    }
+
+    for (int i=0; i<5; i++) {
+        ov2640_reg_write(config, brightness_regs[0][i], brightness_regs[level][i]);
+    }
+
+}
+
+void ov2640_capture_jpeg(ov2640_config_t *config, framesize_t framesize) {
+    ov2640_set_color_format(config, COLOR_FORMAT_JPEG);
+    ov2640_set_framesize(config, framesize);
+    sleep_ms(100);
+    ov2640_frame_capture_single(config, true);
+}

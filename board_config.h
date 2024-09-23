@@ -1,12 +1,14 @@
 #ifndef __BOARD_CONFIG_H__
 #define __BOARD_CONFIG_H__
 
+#include "pico/stdlib.h"
+
 #define UART_INST uart1
 #define CAM_PIO_INST pio0
 #define CAM_FRAME_SM 0
 #define CAM_FRAME_SIZED_SM 1
 
-#define BUF_SIZE 200 * 1024 //200KB image/frame buffer
+#define BUF_SIZE 170 * 1024 //200KB image/frame buffer
 
 #define CUSTOM_BOARD
 

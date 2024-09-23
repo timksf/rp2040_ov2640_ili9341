@@ -77,6 +77,9 @@ uint16_t ov2640_read_id(ov2640_config_t *config);
 void ov2640_set_framesize(ov2640_config_t *config, framesize_t framesize);
 void ov2640_set_color_format(ov2640_config_t *config, color_format_t color_format_t);
 
+void ov2640_capture_jpeg(ov2640_config_t *config, framesize_t framesize);
+
 void ov2640_enable_test_pattern(ov2640_config_t *config);
+void ov2640_set_brightness(ov2640_config_t *config, int8_t level);
 
 #endif
