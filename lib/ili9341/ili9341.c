@@ -6,8 +6,7 @@
 
 //based on adafruit driver
 
-const uint8_t initcmd[] = {
-    24, //24 commands
+static const uint8_t initcmd[] = {
     0xEF, 3, 0x03, 0x80, 0x02,
     0xCF, 3, 0x00, 0xC1, 0x30,
     0xED, 4, 0x64, 0x03, 0x12, 0x81,
@@ -32,11 +31,11 @@ const uint8_t initcmd[] = {
     0x31, 0xC1, 0x48, 0x08, 0x0F, 0x0C, 0x31, 0x36, 0x0F,
     ILI9341_SLPOUT, 0x80, // Exit Sleep
     ILI9341_DISPON, 0x80, // Display on
-    0x00				  // End of list
+    0x00 // endmarker
 };
 
 void ili9341_init(ili9341_config_t *cfg) {
-    spi_init(cfg->spi, 1000 * 50000); //40Mbps
+    spi_init(cfg->spi, 1000 * 40000); //40Mbps
     spi_set_format(cfg->spi, 16, SPI_CPOL_1, SPI_CPHA_1, SPI_MSB_FIRST);
 
     gpio_set_function(cfg->pin_sck, GPIO_FUNC_SPI);
@@ -65,16 +64,14 @@ void ili9341_init(ili9341_config_t *cfg) {
         ili9341_reset(cfg);
 
     const uint8_t *addr = initcmd;
-    uint8_t n_cmds, cmd, n_args;
-    uint16_t ms;
-    n_cmds = *(addr++);
-    while (n_cmds--) {
-        cmd = *(addr++);
+    uint8_t cmd, n_args;
+    while ((cmd = *(addr++))) {
+        // printf("addr: %x", addr);
         uint8_t x = *(addr++);
         n_args = x & 0x7F; //mask out delay bit
+        // printf(" cmd: %x n_args: %d\n", cmd, n_args);
         ili9341_send_command(cfg, cmd, addr, n_args);
         addr += n_args;
-
         if (x & 0x80)
             sleep_ms(150);
     }
@@ -110,13 +107,13 @@ void ili9341_announce_data(ili9341_config_t *cfg) {
 
 void ili9341_write_command(ili9341_config_t *cfg, uint8_t cmd) {
     ili9341_announce_command(cfg);
-    spi_set_format(cfg->spi, 8, SPI_CPOL_1, SPI_CPOL_1, SPI_MSB_FIRST);
+    spi_set_format(cfg->spi, 8, SPI_CPOL_1, SPI_CPHA_1, SPI_MSB_FIRST);
     spi_write_blocking(cfg->spi, &cmd, sizeof(cmd));
 }
 
 void ili9341_write_data(ili9341_config_t *cfg, const uint8_t *d, size_t size) {
     ili9341_announce_data(cfg);
-    spi_set_format(cfg->spi, 8, SPI_CPOL_1, SPI_CPOL_1, SPI_MSB_FIRST);
+    spi_set_format(cfg->spi, 8, SPI_CPOL_1, SPI_CPHA_1, SPI_MSB_FIRST);
     spi_write_blocking(cfg->spi, d, size);
 }
 
@@ -164,11 +161,11 @@ void ili9341_set_addr_window(ili9341_config_t *cfg, uint16_t x, uint16_t y, uint
     ili9341_write_command(cfg, ILI9341_CASET);
     ili9341_write_data(cfg, (uint8_t*)&xa, sizeof(xa));
 
-    // row address set
+    //row address set
     ili9341_write_command(cfg, ILI9341_PASET);
     ili9341_write_data(cfg, (uint8_t*)&ya, sizeof(ya));
 
-    // write to RAM
+    //write to RAM
     ili9341_write_command(cfg, ILI9341_RAMWR);
 }
 
@@ -176,7 +173,7 @@ void ili9341_write_frame(ili9341_config_t *cfg, uint16_t x, uint16_t y, uint16_t
     ili9341_select(cfg);
     ili9341_set_addr_window(cfg, x, y, w, h); // Clipped area
     ili9341_announce_data(cfg);
-    spi_set_format(cfg->spi, 16, SPI_CPOL_1, SPI_CPOL_1, SPI_MSB_FIRST);
+    spi_set_format(cfg->spi, 16, SPI_CPOL_1, SPI_CPHA_1, SPI_MSB_FIRST);
 
     dma_channel_config c = dma_channel_get_default_config(cfg->dma_data_chan);
     channel_config_set_transfer_data_size(&c, DMA_SIZE_16);
@@ -188,7 +185,9 @@ void ili9341_write_frame(ili9341_config_t *cfg, uint16_t x, uint16_t y, uint16_t
         w * h,
         true
     );
+    
     dma_channel_wait_for_finish_blocking(cfg->dma_data_chan);
+    while(spi_is_busy(cfg->spi)) tight_loop_contents();
     ili9341_deselect(cfg);
 }
 
@@ -196,7 +195,7 @@ void ili9341_write_pix(ili9341_config_t *cfg, int x, int y, uint16_t col) {
     ili9341_select(cfg);
     ili9341_set_addr_window(cfg, x, y, 1, 1); // Clipped area
     ili9341_announce_data(cfg);
-    spi_set_format(cfg->spi, 16, SPI_CPOL_1, SPI_CPOL_1, SPI_MSB_FIRST);
+    spi_set_format(cfg->spi, 16, SPI_CPOL_1, SPI_CPHA_1, SPI_MSB_FIRST);
     spi_write16_blocking(cfg->spi, &col, 1);
     ili9341_deselect(cfg);
 }
@@ -206,7 +205,7 @@ void ili9341_stream_start(ili9341_config_t *cfg, uint16_t x, uint16_t y, uint16_
     ili9341_select(cfg);
     ili9341_set_addr_window(cfg, x, y, w, h); // Clipped area
     ili9341_announce_data(cfg);
-    spi_set_format(cfg->spi, 16, SPI_CPOL_1, SPI_CPOL_1, SPI_MSB_FIRST);
+    spi_set_format(cfg->spi, 16, SPI_CPOL_1, SPI_CPHA_1, SPI_MSB_FIRST);
 
     //first, construct the control DMA, which reset the READ address 
     dma_channel_config c = dma_channel_get_default_config(cfg->dma_ctrl_chan);
