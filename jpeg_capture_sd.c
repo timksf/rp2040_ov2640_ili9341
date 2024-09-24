@@ -71,9 +71,9 @@ int main() {
 #endif //CUSTOM_BOARD
 
     // after setup wait for serial terminal connection on USB port
-    // while (!tud_cdc_connected()) { 
-    //     sleep_ms(100);
-    // }
+    while (!tud_cdc_connected()) { 
+        sleep_ms(100);
+    }
     printf("Booted successfully!\n");
 
     setup_gpio();
