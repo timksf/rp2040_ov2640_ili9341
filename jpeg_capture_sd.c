@@ -15,7 +15,13 @@
 #include "board_config.h"
 #include "util.h"
 
+#define FRAME_WIDTH ILI9341_TFTHEIGHT
+#define FRAME_HEIGHT ILI9341_TFTWIDTH
+
+#define JPG_BUF_SIZE 50*1024
+
 uint8_t frame_buf[BUF_SIZE] __attribute__ ((aligned (4)));
+uint16_t jpeg_temp[JPG_BUF_SIZE/2] __attribute__ ((aligned (4)));
 
 //workspace for JPEG decoder
 uint8_t jpgd_ws[TJPGD_WORKSPACE_SIZE] __attribute__((aligned(4)));
@@ -43,6 +49,10 @@ static const uint8_t jd_scale = 3; //scale of 3 to render decoded jpeg scaled by
 typedef struct {
     uint size;
     uint index;
+    uint x_offs;
+    uint y_offs;
+    uint width_out;
+    uint height_out;
 } jpgd_session_t;
 
 //callbacks
@@ -95,9 +105,9 @@ int main() {
 
     add_repeating_timer_ms(-200, timer_callback, NULL, &blink_timer);
 
-    jpgd_session_t jpgd_session = { .size = 0, .index = 0 };
+    jpgd_session_t jpgd_session = { 0 };
 
-    // //init SD card
+    //init SD card
     // if (!sd_init_driver()) {
     //     printf("ERROR: Could not initialize SD card\r\n");
     //     while (true);
@@ -109,15 +119,15 @@ int main() {
     //     printf("ERROR: Could not mount filesystem (%d)\r\n", fr);
     //     while (true);
     // }
+
     JDEC jdec;
     jdec.swap = false;
     JRESULT jr;
 
-    ov2640_set_brightness(&cam_config, -1);
     //capture loop
     while (running) {
         if(pending_capture) {
-            ov2640_set_brightness(&cam_config, -2);
+            ov2640_set_brightness(&cam_config, -1);
             sleep_ms(100);
             ov2640_capture_jpeg(&cam_config, FRAMESIZE_UXGA);
             printf("Successfully captured JPEG image(s)\n");
@@ -129,7 +139,17 @@ int main() {
             jpgd_session.size = decode_end - decode_start + 1;
             jpgd_session.index = 0;
 
+            if(jpgd_session.size > JPG_BUF_SIZE) {
+                printf("Cannot fit JPEG of size %d", jpgd_session.size);
+                pending_capture = false;
+                continue;
+            }
+
             jr = jd_prepare(&jdec, &jd_input, jpgd_ws, TJPGD_WORKSPACE_SIZE, (void*)&jpgd_session);
+            uint output_width = jdec.width / 8;
+            uint output_height = jdec.height / 8;
+            jpgd_session.x_offs = 0;//(FRAME_WIDTH - output_width) >> 1;
+            jpgd_session.y_offs = 0;//(FRAME_HEIGHT - output_height) >> 1;
             if(jr != JDR_OK) {
                 printf("Failed to prepare JPEG decoder %d\n", jr);
                 while(true);
@@ -140,9 +160,12 @@ int main() {
                 printf("Failed to run JPEG decoder %d\n", jr);
                 // while(true);
             }
+            ili9341_write_frame(&lcd_config, 0, 0, output_width, output_height, jpeg_temp);
 
             pending_capture = false;
         }
+        // ov2640_frame_capture_single(&cam_config, true);
+        // ili9341_write_frame(&lcd_config, 0, 0, 320, 240, (uint16_t*)frame_buf);
     }
 
     //unmount drive before stopping
@@ -167,16 +190,21 @@ size_t jd_input(JDEC *jdec, uint8_t *buf, size_t len) {
 }
 
 int jd_output(JDEC *jdec, void *bitmap, JRECT *rect) {
-    
-    (void) jdec;
 
-    volatile uint16_t x = rect->left + 0;
-    volatile uint16_t y = rect->top  + 0;
+    jpgd_session_t *session = (jpgd_session_t*) jdec->device;
+
+    volatile uint16_t x = rect->left + session->x_offs;
+    volatile uint16_t y = rect->top  + session->y_offs;
     volatile uint16_t w = rect->right  + 1 - rect->left;
     volatile uint16_t h = rect->bottom + 1 - rect->top;
 
-    ili9341_write_frame(&lcd_config, x, y, w, h, (uint16_t*) bitmap);
-    printf("rect: x=%d, y=%d, w=%d, h=%d\n", x, y, w, h);
+    // ili9341_write_frame(&lcd_config, x, y, w, h, (uint16_t*) bitmap);
+    // sleep_ms(1);
+    // printf("rect: x=%d, y=%d, w=%d, h=%d\n", x, y, w, h);
+    for(uint i = 0; i < h; i++) 
+        for(uint j = 0; j < w; j++)
+            jpeg_temp[(y+i)*jdec->width/8+(x+j)] = ((uint16_t*)bitmap)[i*w+j];
+
     return 1;
 }
 
@@ -227,8 +255,9 @@ void setup_lcd() {
     lcd_config.pin_sck = PIN_LCD_SCK;
     lcd_config.pin_tx = PIN_LCD_TX;
     lcd_config.dma_data_chan = dma_claim_unused_channel(true);
-    lcd_config.dma_ctrl_chan = dma_claim_unused_channel(true);
+    // lcd_config.dma_ctrl_chan = dma_claim_unused_channel(true);
     lcd_config.frame_buf = (uint16_t*) frame_buf;
+    lcd_config.baudrate = 1000 * 40000;
 }
 
 bool timer_callback(__unused struct repeating_timer *t) {

@@ -19,7 +19,7 @@ void rotary_encoder_init(rotary_encoder_t *encoder) {
     //interrupt handlers have to be added outside of this function
     gpio_set_irq_enabled(encoder->pin_a, GPIO_IRQ_EDGE_FALL | GPIO_IRQ_EDGE_RISE, true);
     gpio_set_irq_enabled(encoder->pin_b, GPIO_IRQ_EDGE_FALL | GPIO_IRQ_EDGE_RISE, true);
-    gpio_set_irq_enabled(encoder->pin_b, GPIO_IRQ_EDGE_RISE | GPIO_IRQ_EDGE_FALL, true);
+    gpio_set_irq_enabled(encoder->pin_btn, GPIO_IRQ_EDGE_RISE | GPIO_IRQ_EDGE_FALL, true);
 
     encoder->state = 0;
     encoder->pos = 0;

@@ -104,7 +104,7 @@ int main() {
             write(1, cam_config.image_buf, cam_config.image_buf_size);
 #endif //CUSTOM_BOARD
         }
-
+        
         // ili9341_write_frame(&lcd_config, 0, 0, ILI9341_TFTHEIGHT, ILI9341_TFTWIDTH, frame_buf);
         // tight_loop_contents();
     }

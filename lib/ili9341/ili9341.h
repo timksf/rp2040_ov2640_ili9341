@@ -99,6 +99,8 @@ typedef struct {
     uint dma_data_chan;
     uint dma_ctrl_chan;
 
+    uint baudrate;
+
     uint width;
     uint height;
 
@@ -111,6 +113,8 @@ void ili9341_set_rotation(ili9341_config_t *cfg, uint8_t m);
 
 void ili9341_write_pix(ili9341_config_t *cfg, int x, int y, uint16_t col);
 void ili9341_write_frame(ili9341_config_t *cfg, uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint16_t *frame);
+
+void ili9341_write_frame_mono(ili9341_config_t *cfg, uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint16_t col);
 
 void ili9341_reset(ili9341_config_t *cfg);
 void ili9341_wait_for_dma(ili9341_config_t *cfg);

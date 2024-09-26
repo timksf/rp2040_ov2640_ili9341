@@ -1,5 +1,32 @@
 # RE
 
+## TODO
+
+### Firmware
+- [ ] Verify SPI sharing between SD and TFT
+- [ ] Finalize GUI layout in simulator
+    - [x] add settings for colorbar/vflip/hflip
+    - [  ] add listview? for files detected on SD card (or a simple config of file explorer)
+    - [x] add choice for JPEG capture size
+- [x] Test GUI with rotary encoder on hardware
+- [ ] Combine the different functions on hardware
+    - [x] GUI as menu navigable with rotary encoder
+    - [ ] Capturing JPEGs to the SDCard
+    - [ ] Streaming a preview when in capture mode
+    - [ ] Showing decoded most recently captured JPEG -> Menu to save or not?
+        - [ ] preview size based on JPEG size
+        - [ ] decode image on second core while displaying loading animation?
+    - [ ] Showing any previously captured JPEG stored on SD Card
+### Other
+- [ ] 3D printed case with at least a camera fixture
+    - fix SD card access
+    - fix buttons (too small, too much force needed)
+    - enclose rotary encoder
+- [ ] 3D print rotary encoder knob
+- [ ] assemble 2 more boards
+- [ ] optionally: test battery mode
+- [ ] !!WRITE DOCs
+
 ### LCD Pins
 
 (Numbering for when Pins are on the right side)

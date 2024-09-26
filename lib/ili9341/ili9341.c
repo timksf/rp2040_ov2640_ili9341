@@ -21,7 +21,7 @@ static const uint8_t initcmd[] = {
     ILI9341_MADCTL, 1, 0x48,	   // Memory Access Control
     ILI9341_VSCRSADD, 1, 0x00,	   // Vertical scroll zero
     ILI9341_PIXFMT, 1, 0x55,
-    ILI9341_FRMCTR1, 2, 0x00, 0x18,
+    ILI9341_FRMCTR1, 2, 0x00, 0x13,
     ILI9341_DFUNCTR, 3, 0x08, 0x82, 0x27,					 // Display Function Control
     0xF2, 1, 0x00,											 // 3Gamma Function Disable
     ILI9341_GAMMASET, 1, 0x01,								 // Gamma curve selected
@@ -35,7 +35,9 @@ static const uint8_t initcmd[] = {
 };
 
 void ili9341_init(ili9341_config_t *cfg) {
-    spi_init(cfg->spi, 1000 * 40000); //40Mbps
+    if(!cfg->baudrate)
+        cfg->baudrate = 1000 * 40000;
+    spi_init(cfg->spi, cfg->baudrate);
     spi_set_format(cfg->spi, 16, SPI_CPOL_1, SPI_CPHA_1, SPI_MSB_FIRST);
 
     gpio_set_function(cfg->pin_sck, GPIO_FUNC_SPI);
@@ -90,11 +92,19 @@ void ili9341_reset(ili9341_config_t *cfg) {
 }
 
 void ili9341_select(ili9341_config_t *cfg) {
+    asm volatile("nop\n");
+    asm volatile("nop\n");
     gpio_put(cfg->pin_cs, 0);
+    asm volatile("nop\n");
+    asm volatile("nop\n");
 }
 
 void ili9341_deselect(ili9341_config_t *cfg) {
+    asm volatile("nop\n");
+    asm volatile("nop\n");
     gpio_put(cfg->pin_cs, 1);
+    asm volatile("nop\n");
+    asm volatile("nop\n");
 }
 
 void ili9341_announce_command(ili9341_config_t *cfg) {
@@ -161,6 +171,9 @@ void ili9341_set_addr_window(ili9341_config_t *cfg, uint16_t x, uint16_t y, uint
     ili9341_write_command(cfg, ILI9341_CASET);
     ili9341_write_data(cfg, (uint8_t*)&xa, sizeof(xa));
 
+    printf("Setting address window: x: %u, y: %u, w: %u, h: %u\n", x, y, w, h);
+    printf("xa: 0x%08X, ya: 0x%08X\n", xa, ya);
+
     //row address set
     ili9341_write_command(cfg, ILI9341_PASET);
     ili9341_write_data(cfg, (uint8_t*)&ya, sizeof(ya));
@@ -170,6 +183,33 @@ void ili9341_set_addr_window(ili9341_config_t *cfg, uint16_t x, uint16_t y, uint
 }
 
 void ili9341_write_frame(ili9341_config_t *cfg, uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint16_t *frame) {
+    volatile uint b = spi_set_baudrate(cfg->spi, cfg->baudrate);
+    ili9341_select(cfg);
+    ili9341_set_addr_window(cfg, x, y, w, h); // Clipped area
+    ili9341_announce_data(cfg);
+    spi_set_format(cfg->spi, 16, SPI_CPOL_1, SPI_CPHA_1, SPI_MSB_FIRST);
+
+    dma_channel_config c = dma_channel_get_default_config(cfg->dma_data_chan);
+    channel_config_set_read_increment(&c, true);
+    channel_config_set_write_increment(&c, false);
+    channel_config_set_transfer_data_size(&c, DMA_SIZE_16);
+    channel_config_set_dreq(&c, spi_get_dreq(cfg->spi, true));
+    dma_channel_configure(
+        cfg->dma_data_chan,
+        &c,
+        &spi_get_hw(cfg->spi)->dr,
+        frame,
+        w * h,
+        true
+    );
+    
+    dma_channel_wait_for_finish_blocking(cfg->dma_data_chan);
+    while(spi_is_busy(cfg->spi)) tight_loop_contents();
+    ili9341_deselect(cfg);
+}
+
+void ili9341_write_frame_mono(ili9341_config_t *cfg, uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint16_t col) {
+    spi_set_baudrate(cfg->spi, cfg->baudrate);
     ili9341_select(cfg);
     ili9341_set_addr_window(cfg, x, y, w, h); // Clipped area
     ili9341_announce_data(cfg);
@@ -177,11 +217,12 @@ void ili9341_write_frame(ili9341_config_t *cfg, uint16_t x, uint16_t y, uint16_t
 
     dma_channel_config c = dma_channel_get_default_config(cfg->dma_data_chan);
     channel_config_set_transfer_data_size(&c, DMA_SIZE_16);
+    channel_config_set_read_increment(&c, false);
     channel_config_set_dreq(&c, spi_get_dreq(cfg->spi, true));
     dma_channel_configure(
         cfg->dma_data_chan, &c,
         &spi_get_hw(cfg->spi)->dr,
-        frame,
+        &col,
         w * h,
         true
     );

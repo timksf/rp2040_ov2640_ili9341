@@ -20,16 +20,16 @@ if (PICO_SDK_VERSION_STRING VERSION_LESS "1.4.0")
 endif()
 
 project(ov2640_ili9341)
-add_compile_options(-Wall -Wextra)
+# add_compile_options(-Wall -Wextra)
 # Initialise the Raspberry Pi Pico SDK
 pico_sdk_init()
 
 # executables
-add_executable(firmware main.c)
+add_executable(firmware firmware.c gui.c rotary_encoder.c util.c)
 pico_enable_stdio_uart(firmware 0)
 pico_enable_stdio_usb(firmware 1)
 
-add_executable(display_test display_main.c rotary_encoder.c) #esa_logo.c
+add_executable(display_test display_main.c rotary_encoder.c gui.c) #esa_logo.c
 # pico_enable_stdio_uart(display_test 1)
 pico_enable_stdio_usb(display_test 1)
 
@@ -46,7 +46,7 @@ pico_enable_stdio_usb(test_sdcard 1)
 
 add_executable(jpeg_sd 
     jpeg_capture_sd.c
-    # sd_config.c
+    sd_config.c
     util.c
 )
 pico_enable_stdio_uart(jpeg_sd 0)
@@ -72,6 +72,8 @@ target_link_libraries(firmware
     pico_stdlib
     ov2640
     ili9341
+    lvgl
+    FatFs_SPI
 )
 
 target_link_libraries(framecapture 
@@ -82,7 +84,7 @@ target_link_libraries(framecapture
 target_link_libraries(display_test
     pico_stdlib
     ili9341
-    # lvgl
+    lvgl
 )
 
 target_link_libraries(test_sdcard 
