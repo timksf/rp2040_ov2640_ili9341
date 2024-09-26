@@ -52,6 +52,7 @@ void save_bin_to_sd(const char *filename, uint8_t *d, uint size) {
 
     uint bytes_written = 0;
     fr = f_write(fp, d, size, &bytes_written);
+    fr = f_sync(fp);
 
     if (fr != FR_OK) {
         printf("ERROR: Could not write to file (%d)\r\n", fr);

@@ -81,5 +81,8 @@ void ov2640_capture_jpeg(ov2640_config_t *config, framesize_t framesize);
 
 void ov2640_enable_test_pattern(ov2640_config_t *config);
 void ov2640_set_brightness(ov2640_config_t *config, int8_t level);
+void ov2640_set_vflip(ov2640_config_t *config, bool vflip);
+void ov2640_reset_cif(ov2640_config_t *config);
+
 
 #endif

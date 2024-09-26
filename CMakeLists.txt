@@ -25,7 +25,13 @@ project(ov2640_ili9341)
 pico_sdk_init()
 
 # executables
-add_executable(firmware firmware.c gui.c rotary_encoder.c util.c)
+add_executable(firmware 
+    firmware.c 
+    gui.c 
+    rotary_encoder.c 
+    util.c
+    sd_config.c
+)
 pico_enable_stdio_uart(firmware 0)
 pico_enable_stdio_usb(firmware 1)
 
@@ -74,6 +80,7 @@ target_link_libraries(firmware
     ili9341
     lvgl
     FatFs_SPI
+    tjpgd
 )
 
 target_link_libraries(framecapture 

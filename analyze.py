@@ -15,7 +15,7 @@ def human_readable_size(size_in_bytes):
     # Return formatted string with 2 decimal places
     return f"{size:.2f} {units[index]}"
 
-data_bytes = np.fromfile("memory.bin", dtype=np.uint8)
+data_bytes = np.fromfile("eee.bin", dtype=np.uint8)
 
 #find SOI and EOI markers
 start_idcs = np.where((data_bytes[:-1] == 0xFF) & (data_bytes[1:] == 0xD8))[0]

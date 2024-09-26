@@ -1,8 +1,12 @@
 #include "gui.h"
 
+#include "lib/ov2640/ov2640.h"
+
 static lv_obj_t *menu;
 static lv_obj_t *main_page;
 static bool camera_preview_enabled;
+
+extern ov2640_config_t cam_config;
 
 void apply_test_pattern(uint32_t v) {
     bool b = (bool) v;
@@ -15,8 +19,9 @@ void apply_hflip(uint32_t v) {
 }
 
 void apply_vflip(uint32_t v) {
-    bool b = (bool) v;
-    printf("Set VFLIP: %d", b);
+    bool f = (bool) v;
+    printf("Set VFLIP: %d", f);
+    ov2640_set_vflip(&cam_config, f);
 }
 
 void apply_not_implemented(uint32_t v) {

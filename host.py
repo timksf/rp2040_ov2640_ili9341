@@ -17,7 +17,7 @@ atexit.register(lambda: ser.close())
 FRAME_WIDTH  = 320
 FRAME_HEIGHT = 240
 
-BUF_SIZE = 200 * 1024
+BUF_SIZE = 2*FRAME_HEIGHT*FRAME_WIDTH
 
 def transmit_test(c):
     ser.reset_input_buffer()

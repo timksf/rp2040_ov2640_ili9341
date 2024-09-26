@@ -2,9 +2,12 @@
 #include <tusb.h>
 #include "pico/stdlib.h"
 #include "hardware/dma.h"
-#include "lib/lvgl/lvgl.h"
+#include "sd_card.h"
+#include "ff.h"
 
 #include "board_config.h"
+#include "lib/lvgl/lvgl.h"
+#include "lib/tjpgd/tjpgd.h"
 #include "lib/ov2640/ov2640.h"
 #include "lib/ili9341/ili9341.h"
 #include "rotary_encoder.h"
@@ -23,7 +26,8 @@ typedef struct {
     uint height_out;
 } jpgd_session_t;
 
-uint16_t frame_buf[FRAME_WIDTH*FRAME_HEIGHT];
+uint8_t frame_buf[BUF_SIZE]; //holds up to exactly one LCD frame
+uint8_t jpgd_ws[TJPGD_WORKSPACE_SIZE];
 
 ov2640_config_t cam_config;
 ili9341_config_t lcd_config;
@@ -33,6 +37,8 @@ static bool pending_capture = false;
 static uint8_t *decode_p;
 static uint8_t *decode_start;
 static uint8_t *decode_end;
+static const uint8_t jd_scale = 3; //scale of 3 to render decoded jpeg scaled by 1/8
+static jpgd_session_t jpgd_session = { 0 };
 
 //lvgl related globals
 uint8_t gl_buf[FRAME_HEIGHT*FRAME_WIDTH*2 / 10]; //1/10 the size of actual frame is recommended
@@ -47,6 +53,10 @@ struct repeating_timer blink_timer;
 void setup_gpio();
 void setup_cam();
 void setup_lcd();
+
+//jpeg decoder input function
+size_t jd_input(JDEC *jdec, uint8_t *buf, size_t len);
+int jd_output(JDEC *jdec, void *bitmap, JRECT *rect);
 
 //forward declaration of callbacks
 void gpio_callback(uint gpio, uint32_t events);
@@ -63,17 +73,14 @@ int main() {
         sleep_ms(100);
     }
 
-    for(int i = 0; i < ILI9341_TFTWIDTH*ILI9341_TFTHEIGHT; i++) 
-        frame_buf[i] = ILI9341_WHITE;
-
     setup_lcd();
     setup_cam();
     setup_gpio();
 
     //LCD init
     ili9341_init(&lcd_config);
-    ili9341_set_rotation(&lcd_config,1); //"landscape mode"
-    ili9341_write_frame(&lcd_config, 0, 0, ILI9341_TFTHEIGHT, ILI9341_TFTWIDTH, (uint16_t*)frame_buf);
+    ili9341_set_rotation(&lcd_config, 1); //"landscape mode"
+    ili9341_write_frame_mono(&lcd_config, 0, 0, ILI9341_TFTHEIGHT, ILI9341_TFTWIDTH, ILI9341_WHITE);
 
     //camera init
     ov2640_init(&cam_config);
@@ -105,36 +112,133 @@ int main() {
     create_menu(menu_screen);
     lv_scr_load(menu_screen);
 
+    //jpeg decoder related
+    JDEC jdec;
+    jdec.swap = false;
+    JRESULT jr;
+
+    FRESULT fr;
+    FATFS fs;
+    char filename[64];
+
+    //init SD card
+    if (!sd_init_driver()) {
+        printf("ERROR: Could not initialize SD card\r\n");
+        cancel_repeating_timer(&blink_timer);
+        add_repeating_timer_ms(-200, blink_callback, NULL, &blink_timer);
+    }
+
+    //mount drive on sdcard
+    fr = f_mount(&fs, "0:", 1);
+    if (fr != FR_OK) {
+        printf("ERROR: Could not mount filesystem (%d)\r\n", fr);
+        cancel_repeating_timer(&blink_timer);
+        add_repeating_timer_ms(-200, blink_callback, NULL, &blink_timer);
+    }
+
     printf("Booted successfully!\n");
 
-    while(1){
+    // ov2640_set_vflip(&cam_config, true);
+    while(1) {
         if(disp_camera_preview()) {
-            // uint16_t col = ILI9341_CYAN;
-            // ili9341_write_frame_mono(&lcd_config, 0, 0, FRAME_WIDTH, FRAME_HEIGHT, col);
-            // sleep_ms(500);
-            // col = ILI9341_BLUE;
-            // ili9341_write_frame_mono(&lcd_config, 0, 0, FRAME_WIDTH, FRAME_HEIGHT, col);
-            // sleep_ms(500);
             ov2640_frame_capture_single(&cam_config, true);
             ili9341_write_frame(&lcd_config, 0, 0, ILI9341_TFTHEIGHT, ILI9341_TFTWIDTH, (uint16_t*)frame_buf);
             if(pending_capture) {
                 sleep_ms(100);
                 ov2640_capture_jpeg(&cam_config, FRAMESIZE_SXGA);
                 printf("Successfully captured JPEG image(s)\n");
-                // save_jpeg_to_sd("test-2.jpg", frame_buf, BUF_SIZE);
+                
+                //setup SPI for SD operation (LCD takes care of that itself)
+                //writing to the SD has to happen before the decoder runs, otherwise the JPG might be overwritten
+                snprintf(filename, 14, "%010d.jpg", to_ms_since_boot(get_absolute_time()));
+                spi_set_baudrate(LCD_SPI_INST, 100 * 1000);
+                spi_set_format(LCD_SPI_INST, 8, SPI_CPOL_0, SPI_CPHA_0, SPI_MSB_FIRST);
+                save_jpeg_to_sd(filename, frame_buf, BUF_SIZE);
 
                 find_next_jpeg(frame_buf, BUF_SIZE, &decode_start, &decode_end);
-                uint size = decode_end - decode_start + 1;
-                if(decode_start && decode_end)
-                    printf("Found JPEG of size %0dB!\n", size);
-                else
-                    printf("Captured JPEG not found!\n");
+                jpgd_session.size = decode_end - decode_start + 1;
+                jpgd_session.index = 0;
 
+                //move JPEG to end of buffer for decoding
+                memmove(frame_buf+BUF_SIZE-jpgd_session.size, decode_start, jpgd_session.size);
+                decode_start = frame_buf+BUF_SIZE-jpgd_session.size;
+                decode_end = decode_start + jpgd_session.size - 1;
+                decode_p = decode_start;
+
+                jr = jd_prepare(&jdec, &jd_input, jpgd_ws, TJPGD_WORKSPACE_SIZE, (void*)&jpgd_session);
+                if(jr != JDR_OK) {
+                    printf("Failed to prepare JPEG decoder %d\n", jr);
+                    while(true);
+                }
+
+                uint output_width = jdec.width / 8;
+                uint output_height = jdec.height / 8;
+                jpgd_session.x_offs = (FRAME_WIDTH - output_width) >> 1;
+                jpgd_session.y_offs = (FRAME_HEIGHT - output_height) >> 1;
+
+                if((BUF_SIZE-jpgd_session.size) < output_width*output_height*2) {
+                    printf("WARN: Decoding will overlap! (Might still work)");
+                }
+                // decode_p = decode_start; no need to reset pointer
+                jr = jd_decomp(&jdec, &jd_output, jd_scale);
+                if(jr != JDR_OK) {
+                    printf("Failed to run JPEG decoder %d\n", jr);
+                    // while(true);
+                }
+                printf("Decoded JPEG! w: %0d, h:%0d\n", output_width, output_height);
+                ili9341_write_frame_mono(&lcd_config, 0, 0, FRAME_WIDTH, FRAME_HEIGHT, ILI9341_WHITE);
+                ili9341_write_frame_mono(&lcd_config, 0, 0, FRAME_WIDTH, FRAME_HEIGHT, ILI9341_WHITE);
+                ili9341_write_frame(&lcd_config, jpgd_session.x_offs, jpgd_session.y_offs, output_width, output_height, (uint16_t*)frame_buf);
                 pending_capture = false;
+
+                //wait for encoder-knob acknowledgement to return to preview
+                while(!nav_encoder.pressed) tight_loop_contents();
+
+                //reset camera settings for preview
+                ov2640_set_color_format(&cam_config, COLOR_FORMAT_RGB565);
+                ov2640_set_framesize(&cam_config, FRAMESIZE_QVGA);
+                ov2640_reset_cif(&cam_config);
+                sleep_ms(200);
             }
         }
     }
+    f_unmount("0:");
 }
+
+size_t jd_input(JDEC *jdec, uint8_t *buf, size_t len) {
+    //the input function is used to fill the JPEG decoder input stream
+    //simply copy from frame buffer where the JPEG is located
+    jpgd_session_t *session = (jpgd_session_t*) jdec->device;
+    if(session->index + len > session->size)
+        len = session->size - session->index;
+
+    if(buf) //copy bytes into buf if not NULL
+        for(uint i = 0; i < len; i++)
+            buf[i] = decode_p[session->index+i];
+
+    session->index += len; //move index further in any case
+    return len;
+}
+
+int jd_output(JDEC *jdec, void *bitmap, JRECT *rect) {
+
+    jpgd_session_t *session = (jpgd_session_t*) jdec->device;
+
+    volatile uint16_t x = rect->left;
+    volatile uint16_t y = rect->top;
+    volatile uint16_t w = rect->right  + 1 - rect->left;
+    volatile uint16_t h = rect->bottom + 1 - rect->top;
+
+    // ili9341_write_frame(&lcd_config, x, y, w, h, (uint16_t*) bitmap);
+    // sleep_ms(1);
+    // printf("rect: x=%d, y=%d, w=%d, h=%d\n", x, y, w, h);
+    for(uint i = 0; i < h; i++) 
+        for(uint j = 0; j < w; j++)
+            ((uint16_t*)frame_buf)[(y+i)*jdec->width/8+(x+j)] = ((uint16_t*)bitmap)[i*w+j];
+
+    return 1;
+}
+
 
 void setup_gpio() {
     gpio_init(PIN_LED);

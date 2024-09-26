@@ -18,10 +18,10 @@
 #define FRAME_WIDTH ILI9341_TFTHEIGHT
 #define FRAME_HEIGHT ILI9341_TFTWIDTH
 
-#define JPG_BUF_SIZE 50*1024
+#define JPG_BUF_SIZE 70*1024
 
 uint8_t frame_buf[BUF_SIZE] __attribute__ ((aligned (4)));
-uint16_t jpeg_temp[JPG_BUF_SIZE/2] __attribute__ ((aligned (4)));
+// uint8_t jpeg_temp[JPG_BUF_SIZE] __attribute__ ((aligned (4)));
 
 //workspace for JPEG decoder
 uint8_t jpgd_ws[TJPGD_WORKSPACE_SIZE] __attribute__((aligned(4)));
@@ -63,7 +63,7 @@ int main() {
 
     FRESULT fr;
     FATFS fs;
-    char filename[] = "test02.txt";
+    char filename[64];
 
     stdio_init_all(); //will only init what is enabled in the CMakeLists file
 
@@ -103,27 +103,30 @@ int main() {
         ((uint16_t*)frame_buf)[i] = ILI9341_WHITE;
     ili9341_write_frame(&lcd_config, 0, 0, ILI9341_TFTHEIGHT, ILI9341_TFTWIDTH, (uint16_t*)frame_buf);
 
-    add_repeating_timer_ms(-200, timer_callback, NULL, &blink_timer);
+    add_repeating_timer_ms(-1000, timer_callback, NULL, &blink_timer);
 
     jpgd_session_t jpgd_session = { 0 };
 
     //init SD card
-    // if (!sd_init_driver()) {
-    //     printf("ERROR: Could not initialize SD card\r\n");
-    //     while (true);
-    // }
+    if (!sd_init_driver()) {
+        printf("ERROR: Could not initialize SD card\r\n");
+        cancel_repeating_timer(&blink_timer);
+        add_repeating_timer_ms(-200, timer_callback, NULL, &blink_timer);
+    }
 
-    // //mount drive on sdcard
-    // fr = f_mount(&fs, "0:", 1);
-    // if (fr != FR_OK) {
-    //     printf("ERROR: Could not mount filesystem (%d)\r\n", fr);
-    //     while (true);
-    // }
+    //mount drive on sdcard
+    fr = f_mount(&fs, "0:", 1);
+    if (fr != FR_OK) {
+        printf("ERROR: Could not mount filesystem (%d)\r\n", fr);
+        cancel_repeating_timer(&blink_timer);
+        add_repeating_timer_ms(-200, timer_callback, NULL, &blink_timer);
+    }
 
     JDEC jdec;
     jdec.swap = false;
     JRESULT jr;
 
+    ov2640_set_vflip(&cam_config, true);
     //capture loop
     while (running) {
         if(pending_capture) {
@@ -131,25 +134,30 @@ int main() {
             sleep_ms(100);
             ov2640_capture_jpeg(&cam_config, FRAMESIZE_UXGA);
             printf("Successfully captured JPEG image(s)\n");
-            // save_jpeg_to_sd("test-2.jpg", frame_buf, BUF_SIZE);
+
+            //setup SPI for SD operation (LCD takes care of that itself)
+            //writing to the SD has to happen before the decoder runs, otherwise the JPG might be overwritten
+            snprintf(filename, 14, "%010d.jpg", to_ms_since_boot(get_absolute_time()));
+            spi_set_baudrate(LCD_SPI_INST, 100 * 1000);
+            spi_set_format(LCD_SPI_INST, 8, SPI_CPOL_0, SPI_CPHA_0, SPI_MSB_FIRST);
+            save_jpeg_to_sd(filename, frame_buf, BUF_SIZE);
+            // printf("%s", filename);
 
             //display preview
             find_next_jpeg(frame_buf, BUF_SIZE, &decode_start, &decode_end);
-            decode_p = decode_start;
             jpgd_session.size = decode_end - decode_start + 1;
             jpgd_session.index = 0;
 
-            if(jpgd_session.size > JPG_BUF_SIZE) {
-                printf("Cannot fit JPEG of size %d", jpgd_session.size);
-                pending_capture = false;
-                continue;
-            }
+            memmove(frame_buf+BUF_SIZE-jpgd_session.size, decode_start, jpgd_session.size);
+            decode_start = frame_buf+BUF_SIZE-jpgd_session.size;
+            decode_end = decode_start + jpgd_session.size - 1;
+            decode_p = decode_start;
 
             jr = jd_prepare(&jdec, &jd_input, jpgd_ws, TJPGD_WORKSPACE_SIZE, (void*)&jpgd_session);
             uint output_width = jdec.width / 8;
             uint output_height = jdec.height / 8;
-            jpgd_session.x_offs = 0;//(FRAME_WIDTH - output_width) >> 1;
-            jpgd_session.y_offs = 0;//(FRAME_HEIGHT - output_height) >> 1;
+            jpgd_session.x_offs = (FRAME_WIDTH - output_width) >> 1;
+            jpgd_session.y_offs = (FRAME_HEIGHT - output_height) >> 1;
             if(jr != JDR_OK) {
                 printf("Failed to prepare JPEG decoder %d\n", jr);
                 while(true);
@@ -160,16 +168,27 @@ int main() {
                 printf("Failed to run JPEG decoder %d\n", jr);
                 // while(true);
             }
-            ili9341_write_frame(&lcd_config, 0, 0, output_width, output_height, jpeg_temp);
+            ili9341_select(&lcd_config);
+            asm volatile("nop\n");
+            ili9341_deselect(&lcd_config);
+            ili9341_write_frame_mono(&lcd_config, 0, 0, 320, 240, ILI9341_WHITE);
+            ili9341_write_frame(&lcd_config, jpgd_session.x_offs, jpgd_session.y_offs, output_width, output_height, (uint16_t*)frame_buf);
 
             pending_capture = false;
+            sleep_ms(2000);
+            memset(frame_buf, 0, BUF_SIZE);
+            ov2640_set_color_format(&cam_config, COLOR_FORMAT_RGB565);
+            ov2640_set_framesize(&cam_config, FRAMESIZE_QVGA);
+            ov2640_reset_cif(&cam_config);
+            sleep_ms(100);
+        } else {
+            ov2640_frame_capture_single(&cam_config, true);
+            ili9341_write_frame(&lcd_config, 0, 0, 320, 240, (uint16_t*)frame_buf);
         }
-        // ov2640_frame_capture_single(&cam_config, true);
-        // ili9341_write_frame(&lcd_config, 0, 0, 320, 240, (uint16_t*)frame_buf);
     }
 
     //unmount drive before stopping
-    // f_unmount("0:");
+    f_unmount("0:");
 
     while(true) tight_loop_contents();
 }
@@ -193,8 +212,8 @@ int jd_output(JDEC *jdec, void *bitmap, JRECT *rect) {
 
     jpgd_session_t *session = (jpgd_session_t*) jdec->device;
 
-    volatile uint16_t x = rect->left + session->x_offs;
-    volatile uint16_t y = rect->top  + session->y_offs;
+    volatile uint16_t x = rect->left;
+    volatile uint16_t y = rect->top;
     volatile uint16_t w = rect->right  + 1 - rect->left;
     volatile uint16_t h = rect->bottom + 1 - rect->top;
 
@@ -203,7 +222,7 @@ int jd_output(JDEC *jdec, void *bitmap, JRECT *rect) {
     // printf("rect: x=%d, y=%d, w=%d, h=%d\n", x, y, w, h);
     for(uint i = 0; i < h; i++) 
         for(uint j = 0; j < w; j++)
-            jpeg_temp[(y+i)*jdec->width/8+(x+j)] = ((uint16_t*)bitmap)[i*w+j];
+            ((uint16_t*)frame_buf)[(y+i)*jdec->width/8+(x+j)] = ((uint16_t*)bitmap)[i*w+j];
 
     return 1;
 }

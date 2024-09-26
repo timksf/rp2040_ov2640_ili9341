@@ -323,8 +323,6 @@ void ov2640_set_framesize(ov2640_config_t *config, framesize_t framesize) {
         regs = ov2640_settings_to_uxga;
     }
 
-    printf("CLKRC: %0x R_DVP_SP: %0x\n", clkrc, pclk_div);
-
     //disable DSP while changing settings
     ov2640_reg_write(config, BANK_SEL, BANK_SEL_DSP);
     ov2640_reg_write(config, R_BYPASS, R_BYPASS_DSP_BYPAS);
@@ -350,18 +348,21 @@ void ov2640_set_framesize(ov2640_config_t *config, framesize_t framesize) {
         default: config->frame_prog_offs = 0; break;
     }
 
+    // printf("CLKRC: %0x R_DVP_SP: %0x\n", clkrc, pclk_div);
+    // printf("Frame bytes: %0d\n", config->frame_size_bytes);
+
     if(config->frame_size_bytes > config->image_buf_size) {
         //TODO: error!!!!!
     }
 
-    uint sm = config->frame_sized_sm;
-    pio_sm_set_enabled(config->pio, sm, false);
-    pio_sm_clear_fifos(config->pio, sm);
+    // uint sm = config->frame_sized_sm;
+    // pio_sm_set_enabled(config->pio, sm, false);
+    // pio_sm_clear_fifos(config->pio, sm);
 
-    pio_sm_restart(config->pio, sm);
-    pio_sm_exec(config->pio, sm, pio_encode_jmp(config->frame_sized_prog_offs));
+    // pio_sm_restart(config->pio, sm);
+    // pio_sm_exec(config->pio, sm, pio_encode_jmp(config->frame_sized_prog_offs));
 
-    pio_sm_set_enabled(config->pio, sm, true);
+    // pio_sm_set_enabled(config->pio, sm, true);
 }
 
 void ov2640_enable_test_pattern(ov2640_config_t *config) {
@@ -390,4 +391,20 @@ void ov2640_capture_jpeg(ov2640_config_t *config, framesize_t framesize) {
     ov2640_set_framesize(config, framesize);
     sleep_ms(100);
     ov2640_frame_capture_single(config, true);
+}
+
+void ov2640_set_vflip(ov2640_config_t *config, bool vflip) {
+    ov2640_reg_write(config, BANK_SEL, BANK_SEL_SENSOR);
+    uint8_t reg04 = ov2640_reg_read(config, REG04);
+    reg04 = (reg04 & ~REG04_VFLIP_IMG) | (vflip << 6);
+    // printf("REG04: %02x", reg04);
+    ov2640_reg_write(config, REG04, reg04);
+}
+
+void ov2640_reset_cif(ov2640_config_t *config) {
+    ov2640_reg_write(config, BANK_SEL, BANK_SEL_DSP);
+    ov2640_reg_write(config, RESET, RESET_CIF);
+    sleep_ms(100);
+    ov2640_reg_write(config, RESET, 0x0);
+    // ov2640_reg_write(config, RESET, RESET_DVP);
 }

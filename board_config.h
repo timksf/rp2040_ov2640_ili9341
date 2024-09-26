@@ -8,7 +8,7 @@
 #define CAM_FRAME_SM 0
 #define CAM_FRAME_SIZED_SM 1
 
-#define BUF_SIZE 170 * 1024 //200KB image/frame buffer
+#define BUF_SIZE 2*320*240 //image/frame buffer sized to fit one LCD frame
 
 #define CUSTOM_BOARD
 

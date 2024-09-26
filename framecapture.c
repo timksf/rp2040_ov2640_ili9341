@@ -68,7 +68,6 @@ int main() {
 
     //frame streaming up to 320x240
     ov2640_set_framesize(&cam_config, FRAMESIZE_QVGA);
-    ov2640_set_framesize(&cam_config, FRAMESIZE_QVGA);
     // ov2640_set_framesize(&cam_config, FRAMESIZE_QVGA);
 
     while(1) {
@@ -84,9 +83,8 @@ int main() {
 #endif //CUSTOM_BOARD
 
         if (cmd == CMD_CAPTURE) {
-            // ov2640_set_color_format(&cam_config, COLOR_FORMAT_RGB565);
-            // ov2640_set_framesize(&cam_config, FRAMESIZE_QVGA);
-            // ov2640_frame_capture_single(&cam_config, true);
+            ov2640_set_color_format(&cam_config, COLOR_FORMAT_RGB565);
+            ov2640_set_framesize(&cam_config, FRAMESIZE_QVGA);
             ov2640_frame_capture_single(&cam_config, true);
 #ifndef CUSTOM_BOARD
             uart_write_blocking(UART_INST, cam_config.image_buf, cam_config.frame_size_bytes);

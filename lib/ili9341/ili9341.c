@@ -93,17 +93,13 @@ void ili9341_reset(ili9341_config_t *cfg) {
 
 void ili9341_select(ili9341_config_t *cfg) {
     asm volatile("nop\n");
-    asm volatile("nop\n");
     gpio_put(cfg->pin_cs, 0);
-    asm volatile("nop\n");
     asm volatile("nop\n");
 }
 
 void ili9341_deselect(ili9341_config_t *cfg) {
     asm volatile("nop\n");
-    asm volatile("nop\n");
     gpio_put(cfg->pin_cs, 1);
-    asm volatile("nop\n");
     asm volatile("nop\n");
 }
 
@@ -171,8 +167,8 @@ void ili9341_set_addr_window(ili9341_config_t *cfg, uint16_t x, uint16_t y, uint
     ili9341_write_command(cfg, ILI9341_CASET);
     ili9341_write_data(cfg, (uint8_t*)&xa, sizeof(xa));
 
-    printf("Setting address window: x: %u, y: %u, w: %u, h: %u\n", x, y, w, h);
-    printf("xa: 0x%08X, ya: 0x%08X\n", xa, ya);
+    // printf("Setting address window: x: %u, y: %u, w: %u, h: %u\n", x, y, w, h);
+    // printf("xa: 0x%08X, ya: 0x%08X\n", xa, ya);
 
     //row address set
     ili9341_write_command(cfg, ILI9341_PASET);

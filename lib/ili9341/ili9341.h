@@ -120,6 +120,7 @@ void ili9341_reset(ili9341_config_t *cfg);
 void ili9341_wait_for_dma(ili9341_config_t *cfg);
 
 void ili9341_select(ili9341_config_t *cfg);
+void ili9341_deselect(ili9341_config_t *cfg);
 void ili9341_write_command(ili9341_config_t *cfg, uint8_t cmd);
 void ili9341_send_command(ili9341_config_t *cfg, uint8_t cmd, const uint8_t *args, uint8_t arg_size);
 void ili9341_write_data(ili9341_config_t *cfg, const uint8_t *d, size_t size);
